@@ -1,13 +1,8 @@
-/*
-  عبّي القيم التالية من Firebase Console بعد إنشاء مشروعك:
-  Project settings → General → Your apps → SDK setup and configuration
-  (راجع خطوات الإعداد الكاملة في README.md)
-*/
 const FIREBASE_CONFIG = {
-  apiKey: "ضع-API-KEY-هنا",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:xxxxxxxxxxxxxxxx"
+  apiKey: "AIzaSyAeWnlN2uqqTkc7UkoAiO7EsTxfGS0mz8M",
+  authDomain: "almassa-hr.firebaseapp.com",
+  projectId: "almassa-hr",
+  storageBucket: "almassa-hr.firebasestorage.app",
+  messagingSenderId: "983304639823",
+  appId: "1:983304639823:web:0ec438088c8464d792213a"
 };
