@@ -23,9 +23,14 @@ const DB = { // إعدادات محلية فقط (لا تتعلق ببيانات
 
 /* ---------- حالة عامة ---------- */
 let EMPLOYEES = [];
+let TEAM = [];
+let TASKS = [];
 let currentFilter = { q:'', company:'', nationality:'', status:'', kpi:'' };
 let activeEmployeeId = null;
 let unsubscribeEmployees = null;
+let unsubscribeTeam = null;
+let unsubscribeTasks = null;
+let unsubscribeChat = null;
 
 const CITIES = ['أبوظبي','دبي','الشارقة','عجمان','أم القيوين','رأس الخيمة','الفجيرة','العين'];
 const END_REASONS = ['استقالة','إنهاء خدمات','هروب','أخرى'];
@@ -134,6 +139,9 @@ function initAuth(){
 
   document.getElementById('logoutBtn').addEventListener('click', ()=>{
     if(unsubscribeEmployees) unsubscribeEmployees();
+    if(unsubscribeTeam) unsubscribeTeam();
+    if(unsubscribeTasks) unsubscribeTasks();
+    if(unsubscribeChat) unsubscribeChat();
     auth.signOut();
   });
 }
@@ -165,7 +173,49 @@ async function boot(){
   bindUI();
   loadSettingsIntoForm();
   await ensureSeedData();
+  await ensureTeamMember();
   subscribeEmployees();
+  subscribeTeam();
+  subscribeTasks();
+  subscribeChat();
+}
+
+function sanitizeEmailId(email){
+  return email.replace(/[^a-zA-Z0-9]/g,'_');
+}
+
+async function ensureTeamMember(){
+  const user = auth.currentUser;
+  if(!user) return;
+  const id = sanitizeEmailId(user.email);
+  const ref = db.collection('team').doc(id);
+  const snap = await ref.get();
+  if(!snap.exists){
+    await ref.set({ email:user.email, name:user.email.split('@')[0] });
+  }
+}
+
+function resolveName(email){
+  const m = TEAM.find(t=>t.email===email);
+  return (m && m.name) || email;
+}
+
+function subscribeTeam(){
+  if(unsubscribeTeam) unsubscribeTeam();
+  unsubscribeTeam = db.collection('team').onSnapshot(snap=>{
+    TEAM = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    populateAssigneeSelect();
+    renderChatMessages();
+    renderTasks();
+  });
+}
+
+function populateAssigneeSelect(){
+  const sel = document.getElementById('taskAssignee');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">غير مسندة</option>' + TEAM.map(t=>`<option value="${t.email}">${t.name} (${t.email})</option>`).join('');
+  sel.value = cur;
 }
 
 async function ensureSeedData(){
@@ -293,7 +343,14 @@ function applyFilters(list){
     if(currentFilter.kpi && !matchesKpi(e, currentFilter.kpi)) return false;
     if(currentFilter.q){
       const q = normalizeAr(currentFilter.q);
-      if(!normalizeAr(e.name).includes(q)) return false;
+      const qRaw = currentFilter.q.trim().toLowerCase();
+      const matchName = normalizeAr(e.name).includes(q);
+      const matchPhone = (e.phone||'').toLowerCase().includes(qRaw);
+      const matchEmail = (e.email||'').toLowerCase().includes(qRaw);
+      const matchWorkCard = (e.workCardNumber||'').toLowerCase().includes(qRaw);
+      const matchPassport = (e.passportNumber||'').toLowerCase().includes(qRaw);
+      const matchEid = (e.emiratesIdNumber||'').toLowerCase().includes(qRaw);
+      if(!matchName && !matchPhone && !matchEmail && !matchWorkCard && !matchPassport && !matchEid) return false;
     }
     if(currentFilter.company && e.company !== currentFilter.company) return false;
     if(currentFilter.nationality && e.nationality !== currentFilter.nationality) return false;
@@ -359,8 +416,8 @@ function renderTable(){
 
 /* ---------- نافذة تفاصيل/تعديل/إضافة الموظف ---------- */
 function emptyEmployee(){
-  return { name:'', nationality:'', company:'', workCardExp:'', residencyIssue:'', residencyExp:'', note:'',
-    passportExp:'', emiratesIdExp:'', phone:'', email:'', address:'', city:'', education:'', jobTitle:'',
+  return { name:'', nationality:'', company:'', workCardExp:'', workCardNumber:'', residencyIssue:'', residencyExp:'', note:'',
+    passportExp:'', passportNumber:'', emiratesIdExp:'', emiratesIdNumber:'', phone:'', email:'', address:'', city:'', education:'', jobTitle:'',
     insuranceNumber:'', insuranceCompany:'', employmentStart:'', employmentEnd:'', employmentEndReason:'',
     salaryBasic:0, salaryAllowances:0, leaves:[] };
 }
@@ -409,8 +466,11 @@ function openEmployeeModal(id){
     <h4 class="section-title" style="margin-top:18px;">تواريخ الوثائق</h4>
     <div class="modal-grid">
       <div class="field"><label class="lbl">انتهاء الجواز</label><input type="date" id="editPassportExp" value="${emp.passportExp||''}"></div>
+      <div class="field"><label class="lbl">رقم الجواز</label><input type="text" id="editPassportNumber" value="${emp.passportNumber||''}"></div>
       <div class="field"><label class="lbl">انتهاء الهوية</label><input type="date" id="editEidExp" value="${emp.emiratesIdExp||''}"></div>
+      <div class="field"><label class="lbl">رقم الهوية</label><input type="text" id="editEidNumber" value="${emp.emiratesIdNumber||''}"></div>
       <div class="field"><label class="lbl">انتهاء بطاقة العمل</label><input type="date" id="editWorkCard" value="${emp.workCardExp||''}"></div>
+      <div class="field"><label class="lbl">رقم بطاقة العمل</label><input type="text" id="editWorkCardNumber" value="${emp.workCardNumber||''}"></div>
       <div class="field"><label class="lbl">إصدار الإقامة</label><input type="date" id="editIssue" value="${emp.residencyIssue||''}"></div>
       <div class="field"><label class="lbl">انتهاء الإقامة</label><input type="date" id="editExp" value="${emp.residencyExp||''}"></div>
     </div>
@@ -432,7 +492,11 @@ function openEmployeeModal(id){
       ${tenureDays !== null ? `<div><span class="lbl">عدد أيام العمل بالشركة</span><span class="val">${tenureDays} يوم</span></div>` : ''}
     </div>
 
-    <button class="btn-gold" id="saveEmpBtn" style="margin-top:16px;">${isNew ? 'إضافة الموظف' : 'حفظ التعديلات'}</button>
+    <div class="btn-row" style="margin-top:16px;">
+      <button class="btn-gold" id="saveEmpBtn">${isNew ? 'إضافة الموظف' : 'حفظ التعديلات'}</button>
+      ${!isNew ? `<button class="btn-secondary" id="exportOneExcelBtn">📥 تصدير Excel</button>
+      <button class="btn-secondary" id="printEmpBtn">🖨️ طباعة</button>` : ''}
+    </div>
     <p id="saveEmpStatus" class="muted" style="margin-top:8px;"></p>
 
     ${isNew ? '<p class="muted" style="margin-top:10px;">بعد إضافة الموظف، افتحه مرة ثانية من الجدول لإرفاق مستندات أو إضافة إجازات.</p>' : `
@@ -474,6 +538,8 @@ function openEmployeeModal(id){
   if(!isNew){
     document.getElementById('fileInput').addEventListener('change', handleFiles);
     document.getElementById('addLeaveBtn').addEventListener('click', addLeave);
+    document.getElementById('exportOneExcelBtn').addEventListener('click', ()=> exportEmployeeExcel(emp));
+    document.getElementById('printEmpBtn').addEventListener('click', ()=> printEmployee(emp));
     renderDocList();
     renderLeaveList();
   }
@@ -493,8 +559,11 @@ function collectEmployeeForm(){
     city: document.getElementById('editCity').value,
     address: document.getElementById('editAddress').value.trim(),
     passportExp: document.getElementById('editPassportExp').value || null,
+    passportNumber: document.getElementById('editPassportNumber').value.trim(),
     emiratesIdExp: document.getElementById('editEidExp').value || null,
+    emiratesIdNumber: document.getElementById('editEidNumber').value.trim(),
     workCardExp: document.getElementById('editWorkCard').value || null,
+    workCardNumber: document.getElementById('editWorkCardNumber').value.trim(),
     residencyIssue: document.getElementById('editIssue').value || null,
     residencyExp: document.getElementById('editExp').value || null,
     insuranceNumber: document.getElementById('editInsuranceNumber').value.trim(),
@@ -606,6 +675,125 @@ async function removeLeave(leaveId){
   }catch(e){ alert('تعذر الحذف: ' + e.message); }
 }
 
+/* ---------- المهام الجماعية ---------- */
+function subscribeTasks(){
+  if(unsubscribeTasks) unsubscribeTasks();
+  unsubscribeTasks = db.collection('tasks').orderBy('createdAt','desc').onSnapshot(snap=>{
+    TASKS = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    renderTasks();
+  }, err=> console.error(err));
+}
+
+function renderTasks(){
+  const el = document.getElementById('taskList');
+  if(!el) return;
+  if(!TASKS.length){ el.innerHTML = '<p class="muted">لا توجد مهام حاليًا.</p>'; return; }
+  const today = new Date(); today.setHours(0,0,0,0);
+  el.innerHTML = TASKS.map(t=>{
+    const assigneeName = t.assignedTo ? resolveName(t.assignedTo) : 'غير مسندة';
+    const createdByName = resolveName(t.createdBy);
+    const assignedDate = fmtDateTime(t.createdAt);
+    const isOverdue = !t.done && t.dueDate && new Date(t.dueDate) < today;
+    return `<div class="task-item ${t.done ? 'done':''}">
+      <input type="checkbox" ${t.done?'checked':''} onchange="toggleTaskDone('${t.id}', this.checked)">
+      <div class="task-body">
+        <div class="task-text">${t.text} ${t.done ? '<span class="badge badge-ok" style="margin-inline-start:6px;">✓ تمت</span>' : (isOverdue ? '<span class="badge badge-expired" style="margin-inline-start:6px;">متأخرة</span>' : '')}</div>
+        <div class="task-meta">مسندة إلى: ${assigneeName} · بواسطة: ${createdByName}</div>
+        <div class="task-meta">تاريخ الإسناد: ${assignedDate || '—'} ${t.dueDate ? ' · تاريخ الانتهاء: ' + fmtDate(t.dueDate) : ''}</div>
+      </div>
+      <button class="task-del" onclick="deleteTask('${t.id}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function addTask(){
+  const text = document.getElementById('taskText').value.trim();
+  const assignedTo = document.getElementById('taskAssignee').value;
+  const dueDate = document.getElementById('taskDueDate').value || null;
+  if(!text) return;
+  try{
+    await db.collection('tasks').add({
+      text, assignedTo, dueDate,
+      createdBy: auth.currentUser.email,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      done:false
+    });
+    document.getElementById('taskText').value = '';
+    document.getElementById('taskDueDate').value = '';
+  }catch(e){ alert('تعذرت إضافة المهمة: ' + e.message); }
+}
+
+async function toggleTaskDone(id, val){
+  try{
+    await db.collection('tasks').doc(id).update({ done: val, doneAt: val ? firebase.firestore.FieldValue.serverTimestamp() : null });
+  }catch(e){ alert('تعذر التحديث: ' + e.message); }
+}
+
+async function deleteTask(id){
+  if(!confirm('حذف هذه المهمة؟')) return;
+  try{ await db.collection('tasks').doc(id).delete(); }
+  catch(e){ alert('تعذر الحذف: ' + e.message); }
+}
+
+/* ---------- دردشة الفريق ---------- */
+function subscribeChat(){
+  if(unsubscribeChat) unsubscribeChat();
+  unsubscribeChat = db.collection('chat_messages').orderBy('createdAt','desc').limit(150).onSnapshot(snap=>{
+    const msgs = snap.docs.map(d=>({ id:d.id, ...d.data() })).reverse();
+    renderChatMessages(msgs);
+  }, err=> console.error(err));
+}
+
+let LAST_CHAT_MSGS = [];
+function renderChatMessages(msgs){
+  if(msgs) LAST_CHAT_MSGS = msgs;
+  const el = document.getElementById('chatMessages');
+  if(!el) return;
+  const myEmail = auth.currentUser && auth.currentUser.email;
+  el.innerHTML = LAST_CHAT_MSGS.map(m=>{
+    const mine = m.senderEmail === myEmail;
+    const time = fmtDateTime(m.createdAt) || '';
+    const attach = m.attachmentUrl ? `<a class="attachment" target="_blank" href="${m.attachmentUrl}">📎 ${m.attachmentName}</a>` : '';
+    return `<div class="chat-msg ${mine?'mine':''}">
+      <div class="sender">${resolveName(m.senderEmail)}</div>
+      ${m.text ? `<div class="text">${m.text}</div>` : ''}
+      ${attach}
+      <div class="time">${time}</div>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendChatMessage(){
+  const input = document.getElementById('chatTextInput');
+  const text = input.value.trim();
+  if(!text) return;
+  input.value = '';
+  try{
+    await db.collection('chat_messages').add({
+      text, senderEmail: auth.currentUser.email,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }catch(e){ alert('تعذر الإرسال: ' + e.message); }
+}
+
+async function sendChatAttachment(file){
+  const caption = document.getElementById('chatTextInput').value.trim();
+  document.getElementById('chatTextInput').value = '';
+  const path = `chat_attachments/${Date.now()}_${file.name}`;
+  const ref = storage.ref().child(path);
+  try{
+    await ref.put(file);
+    const url = await ref.getDownloadURL();
+    await db.collection('chat_messages').add({
+      text: caption, attachmentUrl: url, attachmentName: file.name,
+      senderEmail: auth.currentUser.email,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }catch(e){ alert('تعذر رفع المرفق: ' + e.message); }
+}
+
+
 /* ---------- المستندات (Firebase Storage + Firestore) ---------- */
 function docsRef(empId){
   return db.collection('employees').doc(String(empId)).collection('documents');
@@ -670,6 +858,93 @@ async function removeDoc(docId, path){
   }catch(e){ alert('تعذر الحذف: ' + e.message); }
 }
 
+/* ---------- تصدير Excel ---------- */
+const EXCEL_FIELD_MAP = [
+  ['name','الاسم'],['nationality','الجنسية'],['company','الشركة'],['jobTitle','المهنة'],['education','المؤهل الدراسي'],
+  ['phone','رقم التواصل'],['email','البريد الإلكتروني'],['city','المدينة'],['address','عنوان السكن'],
+  ['passportExp','انتهاء الجواز'],['passportNumber','رقم الجواز'],
+  ['emiratesIdExp','انتهاء الهوية'],['emiratesIdNumber','رقم الهوية'],
+  ['workCardNumber','رقم بطاقة العمل'],['workCardExp','انتهاء بطاقة العمل'],
+  ['residencyIssue','إصدار الإقامة'],['residencyExp','انتهاء الإقامة'],
+  ['insuranceNumber','رقم التأمين الصحي'],['insuranceCompany','شركة التأمين'],
+  ['employmentStart','تاريخ بدء العمل'],['employmentEnd','تاريخ انتهاء العمل'],['employmentEndReason','سبب انتهاء العمل'],
+  ['salaryBasic','الراتب الأساسي'],['salaryAllowances','البدلات'],
+  ['note','ملاحظة']
+];
+
+function employeeToRow(e){
+  const row = {};
+  EXCEL_FIELD_MAP.forEach(([key,label])=>{ row[label] = e[key] ?? ''; });
+  row['الراتب الإجمالي'] = (parseFloat(e.salaryBasic)||0) + (parseFloat(e.salaryAllowances)||0);
+  return row;
+}
+
+function exportAllEmployeesExcel(){
+  const rows = applyFilters(EMPLOYEES).map(employeeToRow);
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'الموظفون');
+  XLSX.writeFile(wb, `موظفو-الماسة-${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function exportEmployeeExcel(emp){
+  const row = employeeToRow(emp);
+  const detailRows = Object.entries(row).map(([label,value])=>({ 'البيان':label, 'القيمة':value }));
+  const ws = XLSX.utils.json_to_sheet(detailRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'بيانات الموظف');
+  if(emp.leaves && emp.leaves.length){
+    const leaveRows = emp.leaves.map(l=>({ 'النوع':l.type, 'السبب':l.reason||'', 'البداية':l.startDate, 'النهاية':l.endDate, 'عدد الأيام':l.days }));
+    const wsLeaves = XLSX.utils.json_to_sheet(leaveRows);
+    XLSX.utils.book_append_sheet(wb, wsLeaves, 'الإجازات');
+  }
+  XLSX.writeFile(wb, `${emp.name || 'موظف'}.xlsx`);
+}
+
+/* ---------- الطباعة ---------- */
+function printEmployee(emp){
+  const s = getStatus(emp);
+  const salaryTotal = (parseFloat(emp.salaryBasic)||0) + (parseFloat(emp.salaryAllowances)||0);
+  const leaveRows = (emp.leaves||[]).map(l=>`<tr><td>${l.type}</td><td>${l.reason||'—'}</td><td>${fmtDate(l.startDate)}</td><td>${fmtDate(l.endDate)}</td><td>${l.days}</td></tr>`).join('');
+  const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>${emp.name}</title>
+  <style>
+    body{ font-family:Arial,sans-serif; padding:30px; color:#111; }
+    h1{ font-size:20px; border-bottom:3px solid #d4af37; padding-bottom:8px; }
+    table{ width:100%; border-collapse:collapse; margin-top:14px; }
+    td,th{ border:1px solid #ccc; padding:8px 10px; font-size:13px; text-align:right; }
+    .section{ margin-top:20px; font-weight:bold; font-size:14px; background:#f5f5f5; padding:6px 10px; }
+  </style></head><body>
+  <h1>نظام الماسة للموارد البشرية — بطاقة موظف</h1>
+  <p><strong>${emp.name}</strong> — الحالة: ${s.label}</p>
+  <div class="section">البيانات الأساسية</div>
+  <table>
+    <tr><td>الجنسية</td><td>${emp.nationality||'—'}</td><td>الشركة</td><td>${emp.company||'—'}</td></tr>
+    <tr><td>المهنة</td><td>${emp.jobTitle||'—'}</td><td>المؤهل الدراسي</td><td>${emp.education||'—'}</td></tr>
+    <tr><td>رقم التواصل</td><td>${emp.phone||'—'}</td><td>البريد الإلكتروني</td><td>${emp.email||'—'}</td></tr>
+    <tr><td>المدينة</td><td>${emp.city||'—'}</td><td>عنوان السكن</td><td>${emp.address||'—'}</td></tr>
+  </table>
+  <div class="section">الوثائق</div>
+  <table>
+    <tr><td>رقم الجواز</td><td>${emp.passportNumber||'—'}</td><td>انتهاء الجواز</td><td>${fmtDate(emp.passportExp)}</td></tr>
+    <tr><td>رقم الهوية</td><td>${emp.emiratesIdNumber||'—'}</td><td>انتهاء الهوية</td><td>${fmtDate(emp.emiratesIdExp)}</td></tr>
+    <tr><td>رقم بطاقة العمل</td><td>${emp.workCardNumber||'—'}</td><td>انتهاء بطاقة العمل</td><td>${fmtDate(emp.workCardExp)}</td></tr>
+    <tr><td>إصدار الإقامة</td><td>${fmtDate(emp.residencyIssue)}</td><td>انتهاء الإقامة</td><td>${fmtDate(emp.residencyExp)}</td></tr>
+  </table>
+  <div class="section">التأمين والتوظيف والراتب</div>
+  <table>
+    <tr><td>رقم التأمين الصحي</td><td>${emp.insuranceNumber||'—'}</td><td>شركة التأمين</td><td>${emp.insuranceCompany||'—'}</td></tr>
+    <tr><td>تاريخ بدء العمل</td><td>${fmtDate(emp.employmentStart)}</td><td>تاريخ انتهاء العمل</td><td>${fmtDate(emp.employmentEnd)}</td></tr>
+    <tr><td>سبب انتهاء العمل</td><td>${emp.employmentEndReason||'—'}</td><td>الراتب الإجمالي</td><td>${salaryTotal.toLocaleString('ar-AE')} د.إ</td></tr>
+  </table>
+  ${leaveRows ? `<div class="section">الإجازات</div><table><tr><th>النوع</th><th>السبب</th><th>البداية</th><th>النهاية</th><th>عدد الأيام</th></tr>${leaveRows}</table>` : ''}
+  <p style="margin-top:24px; font-size:11px; color:#777;">تم إنشاء هذا التقرير تلقائيًا من نظام الماسة للموارد البشرية بتاريخ ${new Date().toLocaleDateString('ar-AE')}</p>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  w.onload = ()=> w.print();
+}
+
 /* ---------- تصدير تقويم ICS (يعمل بدون أي إعداد) ---------- */
 function exportICS(){
   const lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Almassa HR//AR'];
@@ -700,6 +975,12 @@ function loadSettingsIntoForm(){
   const clientId = DB.get('amhr_google_client_id','');
   document.getElementById('googleClientId').value = clientId;
   updateGoogleStatus();
+  const user = auth.currentUser;
+  if(user){
+    db.collection('team').doc(sanitizeEmailId(user.email)).get().then(snap=>{
+      if(snap.exists) document.getElementById('displayNameInput').value = snap.data().name || '';
+    });
+  }
 }
 
 function saveGoogleClientId(){
@@ -793,6 +1074,7 @@ function bindUI(){
     if(e.target.id === 'modalOverlay') document.getElementById('modalOverlay').style.display = 'none';
   });
   document.getElementById('exportIcsBtn').addEventListener('click', exportICS);
+  document.getElementById('exportAllExcelBtn').addEventListener('click', exportAllEmployeesExcel);
   document.getElementById('addEmployeeBtn').addEventListener('click', ()=> openEmployeeModal(null));
   document.getElementById('connectGoogleBtn').addEventListener('click', connectGoogle);
   document.getElementById('saveClientIdBtn').addEventListener('click', saveGoogleClientId);
@@ -836,6 +1118,29 @@ function bindUI(){
       document.getElementById('view-'+view).style.display = 'block';
     });
   });
+
+  document.getElementById('addTaskBtn').addEventListener('click', addTask);
+  document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
+  document.getElementById('chatTextInput').addEventListener('keydown', e=>{
+    if(e.key === 'Enter'){ e.preventDefault(); sendChatMessage(); }
+  });
+  document.getElementById('chatFileInput').addEventListener('change', e=>{
+    const f = e.target.files[0];
+    if(f) sendChatAttachment(f);
+    e.target.value = '';
+  });
+
+  const saveDisplayNameBtn = document.getElementById('saveDisplayNameBtn');
+  if(saveDisplayNameBtn){
+    saveDisplayNameBtn.addEventListener('click', async ()=>{
+      const name = document.getElementById('displayNameInput').value.trim();
+      if(!name) return;
+      try{
+        await db.collection('team').doc(sanitizeEmailId(auth.currentUser.email)).set({ email:auth.currentUser.email, name }, { merge:true });
+        alert('تم حفظ الاسم');
+      }catch(e){ alert('تعذر الحفظ: ' + e.message); }
+    });
+  }
 
   const changePassBtn = document.getElementById('changePassBtn');
   if(changePassBtn){

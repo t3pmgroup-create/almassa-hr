@@ -12,6 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -55,6 +56,8 @@
     </div>
     <nav class="nav">
       <div class="nav-item active" data-view="dashboard">📊 لوحة المتابعة</div>
+      <div class="nav-item" data-view="tasks">📋 المهام</div>
+      <div class="nav-item" data-view="chat">💬 دردشة الفريق</div>
       <div class="nav-item" data-view="settings">⚙️ الإعدادات والتكامل</div>
     </nav>
     <div class="sidebar-footer">
@@ -110,7 +113,7 @@
       </div>
 
       <div class="toolbar">
-        <input type="text" id="searchInput" placeholder="بحث باسم الموظف...">
+        <input type="text" id="searchInput" placeholder="بحث بالاسم / الهاتف / الإيميل / بطاقة العمل / الجواز / الهوية...">
         <select id="filterCompany"></select>
         <select id="filterNationality"></select>
         <select id="filterStatus">
@@ -123,6 +126,7 @@
           <option value="seconded">إعارة</option>
         </select>
         <button class="btn-secondary" id="exportIcsBtn">📅 تصدير تذكيرات (ICS)</button>
+        <button class="btn-secondary" id="exportAllExcelBtn">📊 تصدير الكل (Excel)</button>
         <button class="btn-gold" id="addEmployeeBtn">+ إضافة موظف جديد</button>
         <span id="kpiFilterBadge" class="kpi-filter-badge" style="display:none;"></span>
         <span class="result-count" id="resultCount"></span>
@@ -141,6 +145,40 @@
       </div>
     </section>
 
+    <!-- المهام -->
+    <section id="view-tasks" class="view">
+      <h1 class="page-title">قائمة المهام الجماعية</h1>
+      <p class="page-sub">مهام مشتركة لفريق الموارد البشرية — تقدر تسند أي مهمة لأي حساب مسجّل دخول</p>
+
+      <div class="settings-card" style="max-width:700px;">
+        <div class="modal-grid">
+          <div class="field" style="grid-column:1/-1;"><label class="lbl">نص المهمة</label><input type="text" id="taskText" placeholder="مثال: تجديد إقامة الموظف..."></div>
+          <div class="field"><label class="lbl">إسناد إلى</label><select id="taskAssignee"><option value="">غير مسندة</option></select></div>
+          <div class="field"><label class="lbl">تاريخ الانتهاء</label><input type="date" id="taskDueDate"></div>
+        </div>
+        <button class="btn-gold" id="addTaskBtn" style="margin-top:10px;">+ إضافة مهمة</button>
+      </div>
+
+      <div id="taskList" class="task-list"></div>
+    </section>
+
+    <!-- دردشة الفريق -->
+    <section id="view-chat" class="view">
+      <h1 class="page-title">دردشة الفريق</h1>
+      <p class="page-sub">دردشة داخلية لفريق الموارد البشرية — المرفقات تظهر فقط للمسجّلين دخول</p>
+
+      <div class="chat-box">
+        <div id="chatMessages" class="chat-messages"></div>
+        <div class="chat-input-row">
+          <label class="chat-attach-btn" title="إرفاق ملف">
+            📎<input type="file" id="chatFileInput" hidden>
+          </label>
+          <input type="text" id="chatTextInput" placeholder="اكتب رسالة...">
+          <button class="btn-gold" id="chatSendBtn">إرسال</button>
+        </div>
+      </div>
+    </section>
+
     <!-- الإعدادات -->
     <section id="view-settings" class="view">
       <h1 class="page-title">الإعدادات والتكامل</h1>
@@ -153,6 +191,9 @@
       <div class="settings-card">
         <h3>حسابي</h3>
         <p>الحساب المسجّل دخول حاليًا: <span id="currentUserEmail" style="font-weight:700;"></span></p>
+        <div class="field"><label>الاسم المعروض (يظهر بالمهام والدردشة)</label><input type="text" id="displayNameInput" placeholder="اسمك"></div>
+        <button class="btn-secondary" id="saveDisplayNameBtn">حفظ الاسم</button>
+        <hr class="divider">
         <div class="field"><label>كلمة المرور الجديدة</label><input type="password" id="newPass" placeholder="6 أحرف على الأقل"></div>
         <button class="btn-gold" id="changePassBtn">تحديث كلمة المرور</button>
       </div>
