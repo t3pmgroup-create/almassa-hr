@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام الماسة للموارد البشرية</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
+<script src="firebase-config.js"></script>
+</head>
+<body>
+
+<!-- ===================== شاشة الدخول ===================== -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">HR</div>
+    <h1>نظام الماسة للموارد البشرية</h1>
+    <p class="sub">تسجيل الدخول بحساب فريق الموارد البشرية</p>
+    <div class="gold-underline" style="margin-bottom:24px;"></div>
+    <div id="loginError" class="login-error"></div>
+    <div id="configWarning" class="login-error" style="display:none;">لم يتم إعداد Firebase بعد — راجع ملف README لخطوات الإعداد.</div>
+    <form id="loginForm">
+      <div class="field">
+        <label>البريد الإلكتروني</label>
+        <input type="email" id="emailInput" required autocomplete="username">
+      </div>
+      <div class="field">
+        <label>كلمة المرور</label>
+        <input type="password" id="passInput" required autocomplete="current-password">
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="rememberMe" checked>
+        <label for="rememberMe">تذكرني على هذا الجهاز</label>
+      </div>
+      <button type="submit" class="btn-primary">دخول</button>
+    </form>
+    <p class="login-hint">الحسابات تُدار من مسؤول النظام عبر لوحة Firebase — إذا ما عندك حساب تواصل مع سعيد لإضافتك.</p>
+  </div>
+</div>
+
+<!-- ===================== واجهة النظام ===================== -->
+<div id="appScreen">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">HR</div>
+      <div>
+        <div class="name">الماسة</div>
+        <div class="tag">نظام الموارد البشرية</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item active" data-view="dashboard">📊 لوحة المتابعة</div>
+      <div class="nav-item" data-view="settings">⚙️ الإعدادات والتكامل</div>
+    </nav>
+    <div class="sidebar-footer">
+      <button id="logoutBtn" class="logout-btn">تسجيل الخروج</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- لوحة المتابعة -->
+    <section id="view-dashboard" class="view active-view">
+      <h1 class="page-title">لوحة متابعة الإقامات</h1>
+      <p class="page-sub">265 موظف — بيانات مشتركة مع كامل فريق الموارد البشرية <span id="syncStatus" class="muted"></span></p>
+
+      <div class="kpi-row">
+        <div class="kpi-card kpi-total" data-status="">
+          <div class="kpi-num" id="kpiTotal">0</div>
+          <div class="kpi-label">إجمالي الموظفين</div>
+        </div>
+        <div class="kpi-card kpi-expired" data-status="expired">
+          <div class="kpi-num" id="kpiExpired">0</div>
+          <div class="kpi-label">إقامات منتهية</div>
+        </div>
+        <div class="kpi-card kpi-soon" data-status="soon">
+          <div class="kpi-num" id="kpiSoon">0</div>
+          <div class="kpi-label">تنتهي خلال 60 يوم</div>
+        </div>
+        <div class="kpi-card kpi-ok" data-status="ok">
+          <div class="kpi-num" id="kpiOk">0</div>
+          <div class="kpi-label">سارية</div>
+        </div>
+        <div class="kpi-card kpi-critical" data-status="critical">
+          <div class="kpi-num" id="kpiCritical">0</div>
+          <div class="kpi-label">حالات حرجة</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <input type="text" id="searchInput" placeholder="بحث باسم الموظف...">
+        <select id="filterCompany"></select>
+        <select id="filterNationality"></select>
+        <select id="filterStatus">
+          <option value="">كل الحالات</option>
+          <option value="ok">سارية</option>
+          <option value="soon">تنتهي قريبًا</option>
+          <option value="expired">منتهية</option>
+          <option value="critical">حرجة</option>
+          <option value="renewing">تحت التجديد</option>
+          <option value="seconded">إعارة</option>
+        </select>
+        <button class="btn-secondary" id="exportIcsBtn">📅 تصدير تذكيرات (ICS)</button>
+        <span class="result-count" id="resultCount"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الاسم</th><th>الجنسية</th><th>الشركة</th>
+              <th>إصدار الإقامة</th><th>انتهاء الإقامة</th><th>الحالة</th><th>المستندات</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- الإعدادات -->
+    <section id="view-settings" class="view">
+      <h1 class="page-title">الإعدادات والتكامل</h1>
+      <p class="page-sub">إدارة كلمة المرور وربط خدمات Google</p>
+
+      <div class="callout">
+        الحسابات وصلاحيات الدخول تُدار الآن من <strong>Firebase Console → Authentication</strong> — تقدر تضيف أو تحذف أي موظف موارد بشرية من هناك مباشرة بدون تعديل الكود، ومهما كان عدد الفريق.
+      </div>
+
+      <div class="settings-card">
+        <h3>حسابي</h3>
+        <p>الحساب المسجّل دخول حاليًا: <span id="currentUserEmail" style="font-weight:700;"></span></p>
+        <div class="field"><label>كلمة المرور الجديدة</label><input type="password" id="newPass" placeholder="6 أحرف على الأقل"></div>
+        <button class="btn-gold" id="changePassBtn">تحديث كلمة المرور</button>
+      </div>
+
+      <div class="settings-card">
+        <h3>ربط Google Drive و Google Calendar</h3>
+        <p>يتطلب إنشاء Google Client ID خاص بك من Google Cloud Console (الخطوات في ملف README المرفق).</p>
+        <div class="field">
+          <label>Google Client ID</label>
+          <input type="text" id="googleClientId" placeholder="xxxxxxxx.apps.googleusercontent.com">
+        </div>
+        <div class="btn-row">
+          <button class="btn-secondary" id="saveClientIdBtn">حفظ المعرف</button>
+          <button class="btn-gold" id="connectGoogleBtn">ربط حساب Google</button>
+          <button class="btn-secondary" id="addCalendarEventsBtn">إضافة تذكيرات (90 يوم القادمة) إلى Google Calendar</button>
+        </div>
+        <p id="googleStatus" class="muted" style="margin-top:14px;"></p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- نافذة تفاصيل الموظف -->
+<div id="modalOverlay" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle"></h3>
+      <button id="modalClose" class="modal-close">✕</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<script src="employees-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
