@@ -70,35 +70,35 @@
       <p class="page-sub"><span id="kpiTotalLabel">0</span> موظف — بيانات مشتركة مع كامل فريق الموارد البشرية <span id="syncStatus" class="muted"></span></p>
 
       <div class="kpi-row">
-        <div class="kpi-card kpi-total" data-status="">
+        <div class="kpi-card kpi-total" data-kpi="total">
           <div class="kpi-num" id="kpiTotal">0</div>
           <div class="kpi-label">مجموع الموظفين</div>
         </div>
-        <div class="kpi-card kpi-expired" data-doc="passportExp">
+        <div class="kpi-card kpi-expired" data-kpi="passport">
           <div class="kpi-num" id="kpiPassport">0</div>
           <div class="kpi-label">انتهاء الجواز</div>
         </div>
-        <div class="kpi-card kpi-expired" data-doc="emiratesIdExp">
+        <div class="kpi-card kpi-expired" data-kpi="eid">
           <div class="kpi-num" id="kpiEid">0</div>
           <div class="kpi-label">انتهاء الهوية</div>
         </div>
-        <div class="kpi-card kpi-expired" data-doc="workCardExp">
+        <div class="kpi-card kpi-expired" data-kpi="workcard">
           <div class="kpi-num" id="kpiWorkCard">0</div>
           <div class="kpi-label">انتهاء بطاقة العمل</div>
         </div>
-        <div class="kpi-card kpi-expired" data-doc="residencyExp">
+        <div class="kpi-card kpi-expired" data-kpi="residency">
           <div class="kpi-num" id="kpiResidency">0</div>
           <div class="kpi-label">انتهاء الإقامة</div>
         </div>
-        <div class="kpi-card kpi-soon" data-leave="سنوية">
+        <div class="kpi-card kpi-soon" data-kpi="annual">
           <div class="kpi-num" id="kpiAnnualLeave">0</div>
           <div class="kpi-label">في إجازة سنوية</div>
         </div>
-        <div class="kpi-card kpi-soon" data-leave="مرضية">
+        <div class="kpi-card kpi-soon" data-kpi="sick">
           <div class="kpi-num" id="kpiSickLeave">0</div>
           <div class="kpi-label">في إجازة مرضية</div>
         </div>
-        <div class="kpi-card kpi-ok" data-status="">
+        <div class="kpi-card kpi-ok" data-kpi="present">
           <div class="kpi-num" id="kpiPresent">0</div>
           <div class="kpi-label">على الدوام</div>
         </div>
@@ -124,6 +124,7 @@
         </select>
         <button class="btn-secondary" id="exportIcsBtn">📅 تصدير تذكيرات (ICS)</button>
         <button class="btn-gold" id="addEmployeeBtn">+ إضافة موظف جديد</button>
+        <span id="kpiFilterBadge" class="kpi-filter-badge" style="display:none;"></span>
         <span class="result-count" id="resultCount"></span>
       </div>
 

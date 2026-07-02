@@ -23,7 +23,7 @@ const DB = { // إعدادات محلية فقط (لا تتعلق ببيانات
 
 /* ---------- حالة عامة ---------- */
 let EMPLOYEES = [];
-let currentFilter = { q:'', company:'', nationality:'', status:'' };
+let currentFilter = { q:'', company:'', nationality:'', status:'', kpi:'' };
 let activeEmployeeId = null;
 let unsubscribeEmployees = null;
 
@@ -68,6 +68,13 @@ function fmtDate(s){
   if(!s) return '—';
   const d = new Date(s);
   return d.toLocaleDateString('ar-AE', { year:'numeric', month:'2-digit', day:'2-digit' });
+}
+
+function fmtDateTime(ts){
+  if(!ts) return null;
+  const d = (ts && typeof ts.toDate === 'function') ? ts.toDate() : new Date(ts);
+  if(isNaN(d.getTime())) return null;
+  return d.toLocaleString('ar-AE', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
 }
 
 function daysBetween(a,b){
@@ -268,8 +275,22 @@ function normalizeAr(s){
     .toLowerCase();
 }
 
+function matchesKpi(e, kpi){
+  switch(kpi){
+    case 'passport': return isDocIssue(e.passportExp);
+    case 'eid': return isDocIssue(e.emiratesIdExp);
+    case 'workcard': return isDocIssue(e.workCardExp);
+    case 'residency': return isDocIssue(e.residencyExp);
+    case 'annual': return isOnLeaveToday(e,'سنوية');
+    case 'sick': return isOnLeaveToday(e,'مرضية');
+    case 'present': return !isOnLeaveToday(e);
+    default: return true;
+  }
+}
+
 function applyFilters(list){
   return list.filter(e=>{
+    if(currentFilter.kpi && !matchesKpi(e, currentFilter.kpi)) return false;
     if(currentFilter.q){
       const q = normalizeAr(currentFilter.q);
       if(!normalizeAr(e.name).includes(q)) return false;
@@ -331,6 +352,10 @@ function openEmployeeModal(id){
   if(!emp) return;
   document.getElementById('modalTitle').textContent = isNew ? 'إضافة موظف جديد' : emp.name;
 
+  const lastEditText = fmtDateTime(emp.lastEditedAt);
+  const lastEditHtml = (!isNew && lastEditText) ?
+    `<p class="last-edit-info">آخر تعديل: <strong>${emp.lastEditedBy||'—'}</strong> — ${lastEditText}</p>` : '';
+
   const cityOptions = ['<option value="">—</option>'].concat(
     CITIES.map(c=>`<option value="${c}" ${emp.city===c?'selected':''}>${c}</option>`)
   ).join('');
@@ -342,6 +367,7 @@ function openEmployeeModal(id){
   const salaryTotal = (parseFloat(emp.salaryBasic)||0) + (parseFloat(emp.salaryAllowances)||0);
 
   document.getElementById('modalBody').innerHTML = `
+    ${lastEditHtml}
     <h4 class="section-title">البيانات الأساسية</h4>
     <div class="modal-grid">
       <div class="field"><label class="lbl">الاسم</label><input type="text" id="editName" value="${emp.name||''}"></div>
@@ -469,6 +495,8 @@ async function addNewEmployee(){
   const newId = EMPLOYEES.length ? Math.max(...EMPLOYEES.map(e=>e.id)) + 1 : 1;
   data.id = newId;
   data.leaves = [];
+  data.lastEditedBy = auth.currentUser.email;
+  data.lastEditedAt = firebase.firestore.FieldValue.serverTimestamp();
   try{
     await db.collection('employees').doc(String(newId)).set(data);
     status.textContent = 'تمت الإضافة ✓';
@@ -482,6 +510,8 @@ async function saveEmployeeEdits(){
   const status = document.getElementById('saveEmpStatus');
   status.textContent = 'جاري الحفظ...';
   const updates = collectEmployeeForm();
+  updates.lastEditedBy = auth.currentUser.email;
+  updates.lastEditedAt = firebase.firestore.FieldValue.serverTimestamp();
   try{
     await db.collection('employees').doc(String(activeEmployeeId)).update(updates);
     status.textContent = 'تم الحفظ ✓ — التعديل ظاهر الآن لكل الفريق';
@@ -527,7 +557,9 @@ async function addLeave(){
   status.textContent = 'جاري الحفظ...';
   try{
     await db.collection('employees').doc(String(activeEmployeeId)).update({
-      leaves: firebase.firestore.FieldValue.arrayUnion(newLeave)
+      leaves: firebase.firestore.FieldValue.arrayUnion(newLeave),
+      lastEditedBy: auth.currentUser.email,
+      lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     status.textContent = 'تمت إضافة الإجازة ✓';
     document.getElementById('leaveReason').value = '';
@@ -546,7 +578,9 @@ async function removeLeave(leaveId){
   if(!leave) return;
   try{
     await db.collection('employees').doc(String(activeEmployeeId)).update({
-      leaves: firebase.firestore.FieldValue.arrayRemove(leave)
+      leaves: firebase.firestore.FieldValue.arrayRemove(leave),
+      lastEditedBy: auth.currentUser.email,
+      lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     setTimeout(renderLeaveList, 400);
   }catch(e){ alert('تعذر الحذف: ' + e.message); }
@@ -590,6 +624,10 @@ async function handleFiles(e){
         addedAt: firebase.firestore.FieldValue.serverTimestamp(),
         uploadedBy: auth.currentUser.email
       });
+      await db.collection('employees').doc(String(activeEmployeeId)).update({
+        lastEditedBy: auth.currentUser.email,
+        lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
     }catch(err){
       alert('فشل رفع الملف ' + f.name + ': ' + err.message);
     }
@@ -603,6 +641,10 @@ async function removeDoc(docId, path){
   try{
     await storage.ref().child(path).delete().catch(()=>{});
     await docsRef(activeEmployeeId).doc(docId).delete();
+    await db.collection('employees').doc(String(activeEmployeeId)).update({
+      lastEditedBy: auth.currentUser.email,
+      lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
     renderDocList();
     renderTable();
   }catch(e){ alert('تعذر الحذف: ' + e.message); }
@@ -736,14 +778,33 @@ function bindUI(){
   document.getElementById('saveClientIdBtn').addEventListener('click', saveGoogleClientId);
   document.getElementById('addCalendarEventsBtn').addEventListener('click', addExpiryEventsToCalendar);
 
+  const kpiLabels = {
+    total:'', passport:'انتهاء الجواز', eid:'انتهاء الهوية', workcard:'انتهاء بطاقة العمل',
+    residency:'انتهاء الإقامة', annual:'في إجازة سنوية', sick:'في إجازة مرضية', present:'على الدوام'
+  };
   document.querySelectorAll('.kpi-card').forEach(c=>{
     c.addEventListener('click', ()=>{
-      if(c.dataset.status !== undefined){
-        currentFilter.status = c.dataset.status || '';
-        document.getElementById('filterStatus').value = currentFilter.status;
-        renderTable();
+      const kpi = c.dataset.kpi;
+      currentFilter.kpi = (kpi === 'total') ? '' : kpi;
+      currentFilter.status = ''; currentFilter.q=''; currentFilter.company=''; currentFilter.nationality='';
+      document.getElementById('searchInput').value = '';
+      document.getElementById('filterCompany').value = '';
+      document.getElementById('filterNationality').value = '';
+      document.getElementById('filterStatus').value = '';
+      const badge = document.getElementById('kpiFilterBadge');
+      if(currentFilter.kpi){
+        badge.style.display = 'inline-block';
+        badge.textContent = `فلتر: ${kpiLabels[kpi]} ✕`;
+      } else {
+        badge.style.display = 'none';
       }
+      renderTable();
     });
+  });
+  document.getElementById('kpiFilterBadge').addEventListener('click', ()=>{
+    currentFilter.kpi = '';
+    document.getElementById('kpiFilterBadge').style.display = 'none';
+    renderTable();
   });
 
   document.querySelectorAll('.nav-item').forEach(item=>{
