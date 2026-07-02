@@ -1,4 +1,4 @@
-const FIREBASE_CONFIG = {
+window.FIREBASE_CONFIG = {
   apiKey: "AIzaSyAeWnlN2uqqTkc7UkoAiO7EsTxfGS0mz8M",
   authDomain: "almassa-hr.firebaseapp.com",
   projectId: "almassa-hr",
