@@ -11,6 +11,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
 <script src="firebase-config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -65,30 +66,47 @@
 
     <!-- لوحة المتابعة -->
     <section id="view-dashboard" class="view active-view">
-      <h1 class="page-title">لوحة متابعة الإقامات</h1>
-      <p class="page-sub">265 موظف — بيانات مشتركة مع كامل فريق الموارد البشرية <span id="syncStatus" class="muted"></span></p>
+      <h1 class="page-title">لوحة متابعة الموظفين</h1>
+      <p class="page-sub"><span id="kpiTotalLabel">0</span> موظف — بيانات مشتركة مع كامل فريق الموارد البشرية <span id="syncStatus" class="muted"></span></p>
 
       <div class="kpi-row">
         <div class="kpi-card kpi-total" data-status="">
           <div class="kpi-num" id="kpiTotal">0</div>
-          <div class="kpi-label">إجمالي الموظفين</div>
+          <div class="kpi-label">مجموع الموظفين</div>
         </div>
-        <div class="kpi-card kpi-expired" data-status="expired">
-          <div class="kpi-num" id="kpiExpired">0</div>
-          <div class="kpi-label">إقامات منتهية</div>
+        <div class="kpi-card kpi-expired" data-doc="passportExp">
+          <div class="kpi-num" id="kpiPassport">0</div>
+          <div class="kpi-label">انتهاء الجواز</div>
         </div>
-        <div class="kpi-card kpi-soon" data-status="soon">
-          <div class="kpi-num" id="kpiSoon">0</div>
-          <div class="kpi-label">تنتهي خلال 60 يوم</div>
+        <div class="kpi-card kpi-expired" data-doc="emiratesIdExp">
+          <div class="kpi-num" id="kpiEid">0</div>
+          <div class="kpi-label">انتهاء الهوية</div>
         </div>
-        <div class="kpi-card kpi-ok" data-status="ok">
-          <div class="kpi-num" id="kpiOk">0</div>
-          <div class="kpi-label">سارية</div>
+        <div class="kpi-card kpi-expired" data-doc="workCardExp">
+          <div class="kpi-num" id="kpiWorkCard">0</div>
+          <div class="kpi-label">انتهاء بطاقة العمل</div>
         </div>
-        <div class="kpi-card kpi-critical" data-status="critical">
-          <div class="kpi-num" id="kpiCritical">0</div>
-          <div class="kpi-label">حالات حرجة</div>
+        <div class="kpi-card kpi-expired" data-doc="residencyExp">
+          <div class="kpi-num" id="kpiResidency">0</div>
+          <div class="kpi-label">انتهاء الإقامة</div>
         </div>
+        <div class="kpi-card kpi-soon" data-leave="سنوية">
+          <div class="kpi-num" id="kpiAnnualLeave">0</div>
+          <div class="kpi-label">في إجازة سنوية</div>
+        </div>
+        <div class="kpi-card kpi-soon" data-leave="مرضية">
+          <div class="kpi-num" id="kpiSickLeave">0</div>
+          <div class="kpi-label">في إجازة مرضية</div>
+        </div>
+        <div class="kpi-card kpi-ok" data-status="">
+          <div class="kpi-num" id="kpiPresent">0</div>
+          <div class="kpi-label">على الدوام</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h4 class="section-title">توزيع الموظفين حسب الجنسية</h4>
+        <canvas id="nationalityChart" height="90"></canvas>
       </div>
 
       <div class="toolbar">
@@ -105,6 +123,7 @@
           <option value="seconded">إعارة</option>
         </select>
         <button class="btn-secondary" id="exportIcsBtn">📅 تصدير تذكيرات (ICS)</button>
+        <button class="btn-gold" id="addEmployeeBtn">+ إضافة موظف جديد</button>
         <span class="result-count" id="resultCount"></span>
       </div>
 
