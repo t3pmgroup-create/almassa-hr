@@ -305,11 +305,31 @@ function applyFilters(list){
   });
 }
 
+function activeLeave(emp, type){
+  if(!emp.leaves || !emp.leaves.length) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return emp.leaves.find(l=> l.type===type && new Date(l.startDate)<=today && today<=new Date(l.endDate));
+}
+
+function getColumnConfig(kpi){
+  switch(kpi){
+    case 'passport': return { issueLabel:'—', expLabel:'انتهاء الجواز', issue:()=>null, exp:e=>e.passportExp };
+    case 'eid': return { issueLabel:'—', expLabel:'انتهاء الهوية', issue:()=>null, exp:e=>e.emiratesIdExp };
+    case 'workcard': return { issueLabel:'—', expLabel:'انتهاء بطاقة العمل', issue:()=>null, exp:e=>e.workCardExp };
+    case 'annual': return { issueLabel:'بداية الإجازة', expLabel:'نهاية الإجازة', issue:e=>(activeLeave(e,'سنوية')||{}).startDate, exp:e=>(activeLeave(e,'سنوية')||{}).endDate };
+    case 'sick': return { issueLabel:'بداية الإجازة', expLabel:'نهاية الإجازة', issue:e=>(activeLeave(e,'مرضية')||{}).startDate, exp:e=>(activeLeave(e,'مرضية')||{}).endDate };
+    default: return { issueLabel:'إصدار الإقامة', expLabel:'انتهاء الإقامة', issue:e=>e.residencyIssue, exp:e=>e.residencyExp };
+  }
+}
+
 /* ---------- الجدول ---------- */
 function renderTable(){
   const list = applyFilters(EMPLOYEES);
   const tbody = document.getElementById('tableBody');
   document.getElementById('resultCount').textContent = `${list.length} من ${EMPLOYEES.length}`;
+  const col = getColumnConfig(currentFilter.kpi);
+  document.getElementById('colIssueHeader').textContent = col.issueLabel;
+  document.getElementById('colExpHeader').textContent = col.expLabel;
   if(list.length === 0){
     tbody.innerHTML = `<tr><td colspan="7" class="empty-state">لا توجد نتائج مطابقة</td></tr>`;
     return;
@@ -320,8 +340,8 @@ function renderTable(){
       <td class="cell-name">${e.name}</td>
       <td>${e.nationality || '—'}</td>
       <td>${e.company || '—'}</td>
-      <td>${fmtDate(e.residencyIssue)}</td>
-      <td>${fmtDate(e.residencyExp)}</td>
+      <td>${fmtDate(col.issue(e))}</td>
+      <td>${fmtDate(col.exp(e))}</td>
       <td><span class="badge ${s.cls}">${s.label}</span></td>
       <td class="cell-docs" id="docCount_${e.id}">…</td>
     </tr>`;
