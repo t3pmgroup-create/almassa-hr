@@ -72,14 +72,39 @@ function isDocIssue(dateStr){
 function fmtDate(s){
   if(!s) return '—';
   const d = new Date(s);
-  return d.toLocaleDateString('ar-AE', { year:'numeric', month:'2-digit', day:'2-digit' });
+  if(isNaN(d.getTime())) return '—';
+  const day = String(d.getDate()).padStart(2,'0');
+  const month = String(d.getMonth()+1).padStart(2,'0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
 function fmtDateTime(ts){
   if(!ts) return null;
   const d = (ts && typeof ts.toDate === 'function') ? ts.toDate() : new Date(ts);
   if(isNaN(d.getTime())) return null;
-  return d.toLocaleString('ar-AE', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+  const day = String(d.getDate()).padStart(2,'0');
+  const month = String(d.getMonth()+1).padStart(2,'0');
+  const year = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  return `${day}/${month}/${year} ${hh}:${mm}`;
+}
+
+// يضيف تأكيد نصي (يوم/شهر/سنة) تحت كل حقل تاريخ داخل حاوية معيّنة، بغض النظر عن شكل عرض التقويم بالمتصفح
+function attachDatePreviews(container){
+  if(!container) return;
+  container.querySelectorAll('input[type="date"]').forEach(inp=>{
+    let preview = inp.nextElementSibling;
+    if(!preview || !preview.classList.contains('date-preview')){
+      preview = document.createElement('span');
+      preview.className = 'date-preview';
+      inp.insertAdjacentElement('afterend', preview);
+    }
+    const update = ()=>{ preview.textContent = inp.value ? ('المُدخل: ' + fmtDate(inp.value)) : ''; };
+    update();
+    inp.addEventListener('input', update);
+  });
 }
 
 function daysBetween(a,b){
@@ -488,7 +513,7 @@ function openEmployeeModal(id){
       <div class="field"><label class="lbl">سبب انتهاء العمل</label><select id="editEndReason">${endReasonOptions}</select></div>
       <div class="field"><label class="lbl">الراتب الأساسي</label><input type="number" id="editSalaryBasic" value="${emp.salaryBasic||0}"></div>
       <div class="field"><label class="lbl">البدلات</label><input type="number" id="editSalaryAllowances" value="${emp.salaryAllowances||0}"></div>
-      <div><span class="lbl">الراتب الإجمالي</span><span class="val" id="salaryTotalDisplay">${salaryTotal.toLocaleString('ar-AE')} د.إ</span></div>
+      <div><span class="lbl">الراتب الإجمالي</span><span class="val" id="salaryTotalDisplay">${salaryTotal.toLocaleString('en-US')} د.إ</span></div>
       ${tenureDays !== null ? `<div><span class="lbl">عدد أيام العمل بالشركة</span><span class="val">${tenureDays} يوم</span></div>` : ''}
     </div>
 
@@ -528,10 +553,11 @@ function openEmployeeModal(id){
   const allowInput = document.getElementById('editSalaryAllowances');
   const updateTotal = ()=>{
     const t = (parseFloat(basicInput.value)||0) + (parseFloat(allowInput.value)||0);
-    document.getElementById('salaryTotalDisplay').textContent = t.toLocaleString('ar-AE') + ' د.إ';
+    document.getElementById('salaryTotalDisplay').textContent = t.toLocaleString('en-US') + ' د.إ';
   };
   basicInput.addEventListener('input', updateTotal);
   allowInput.addEventListener('input', updateTotal);
+  attachDatePreviews(document.getElementById('modalBody'));
 
   document.getElementById('saveEmpBtn').addEventListener('click', isNew ? addNewEmployee : saveEmployeeEdits);
 
@@ -654,6 +680,8 @@ async function addLeave(){
     document.getElementById('leaveReason').value = '';
     document.getElementById('leaveStart').value = '';
     document.getElementById('leaveEnd').value = '';
+    document.getElementById('leaveStart').dispatchEvent(new Event('input'));
+    document.getElementById('leaveEnd').dispatchEvent(new Event('input'));
     setTimeout(renderLeaveList, 400);
   }catch(e){
     status.textContent = 'تعذر الحفظ: ' + e.message;
@@ -720,6 +748,7 @@ async function addTask(){
     });
     document.getElementById('taskText').value = '';
     document.getElementById('taskDueDate').value = '';
+    document.getElementById('taskDueDate').dispatchEvent(new Event('input'));
   }catch(e){ alert('تعذرت إضافة المهمة: ' + e.message); }
 }
 
@@ -934,10 +963,10 @@ function printEmployee(emp){
   <table>
     <tr><td>رقم التأمين الصحي</td><td>${emp.insuranceNumber||'—'}</td><td>شركة التأمين</td><td>${emp.insuranceCompany||'—'}</td></tr>
     <tr><td>تاريخ بدء العمل</td><td>${fmtDate(emp.employmentStart)}</td><td>تاريخ انتهاء العمل</td><td>${fmtDate(emp.employmentEnd)}</td></tr>
-    <tr><td>سبب انتهاء العمل</td><td>${emp.employmentEndReason||'—'}</td><td>الراتب الإجمالي</td><td>${salaryTotal.toLocaleString('ar-AE')} د.إ</td></tr>
+    <tr><td>سبب انتهاء العمل</td><td>${emp.employmentEndReason||'—'}</td><td>الراتب الإجمالي</td><td>${salaryTotal.toLocaleString('en-US')} د.إ</td></tr>
   </table>
   ${leaveRows ? `<div class="section">الإجازات</div><table><tr><th>النوع</th><th>السبب</th><th>البداية</th><th>النهاية</th><th>عدد الأيام</th></tr>${leaveRows}</table>` : ''}
-  <p style="margin-top:24px; font-size:11px; color:#777;">تم إنشاء هذا التقرير تلقائيًا من نظام الماسة للموارد البشرية بتاريخ ${new Date().toLocaleDateString('ar-AE')}</p>
+  <p style="margin-top:24px; font-size:11px; color:#777;">تم إنشاء هذا التقرير تلقائيًا من نظام الماسة للموارد البشرية بتاريخ ${fmtDate(new Date())}</p>
   </body></html>`;
   const w = window.open('', '_blank');
   w.document.write(html);
@@ -1120,6 +1149,7 @@ function bindUI(){
   });
 
   document.getElementById('addTaskBtn').addEventListener('click', addTask);
+  attachDatePreviews(document.getElementById('view-tasks'));
   document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
   document.getElementById('chatTextInput').addEventListener('keydown', e=>{
     if(e.key === 'Enter'){ e.preventDefault(); sendChatMessage(); }
