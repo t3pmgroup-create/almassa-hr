@@ -158,7 +158,7 @@ function initAuth(){
     try{
       await auth.setPersistence(remember ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION);
       await auth.signInWithEmailAndPassword(email, pass);
-      logLoginEvent(email, 'دخول');
+      logActivity('دخول', '');
     }catch(ex){
       err.textContent = translateAuthError(ex.code);
       err.style.display = 'block';
@@ -166,8 +166,7 @@ function initAuth(){
   });
 
   document.getElementById('logoutBtn').addEventListener('click', ()=>{
-    const email = auth.currentUser && auth.currentUser.email;
-    if(email) logLoginEvent(email, 'خروج');
+    if(auth.currentUser) logActivity('خروج', '');
     if(unsubscribeEmployees) unsubscribeEmployees();
     if(unsubscribeTeam) unsubscribeTeam();
     if(unsubscribeTasks) unsubscribeTasks();
@@ -621,6 +620,7 @@ async function addNewEmployee(){
   data.lastEditedAt = firebase.firestore.FieldValue.serverTimestamp();
   try{
     await db.collection('employees').doc(String(newId)).set(data);
+    logActivity('إضافة موظف', `أضاف الموظف: ${data.name}`);
     status.textContent = 'تمت الإضافة ✓';
     setTimeout(()=>{ document.getElementById('modalOverlay').style.display = 'none'; }, 700);
   }catch(e){
@@ -636,6 +636,7 @@ async function saveEmployeeEdits(){
   updates.lastEditedAt = firebase.firestore.FieldValue.serverTimestamp();
   try{
     await db.collection('employees').doc(String(activeEmployeeId)).update(updates);
+    logActivity('تعديل موظف', `عدّل بيانات الموظف: ${updates.name || activeEmployeeId}`);
     status.textContent = 'تم الحفظ ✓ — التعديل ظاهر الآن لكل الفريق';
   }catch(e){
     status.textContent = 'تعذر الحفظ: ' + e.message;
@@ -683,6 +684,7 @@ async function addLeave(){
       lastEditedBy: auth.currentUser.email,
       lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    logActivity('إضافة إجازة', `أضاف إجازة (${type}) لـ ${emp.name} من ${start} إلى ${end}`);
     status.textContent = 'تمت إضافة الإجازة ✓';
     document.getElementById('leaveReason').value = '';
     document.getElementById('leaveStart').value = '';
@@ -706,6 +708,7 @@ async function removeLeave(leaveId){
       lastEditedBy: auth.currentUser.email,
       lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    logActivity('حذف إجازة', `حذف إجازة (${leave.type}) لـ ${emp.name}`);
     setTimeout(renderLeaveList, 400);
   }catch(e){ alert('تعذر الحذف: ' + e.message); }
 }
@@ -753,6 +756,7 @@ async function addTask(){
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       done:false
     });
+    logActivity('إضافة مهمة', `أضاف مهمة: ${text}`);
     document.getElementById('taskText').value = '';
     document.getElementById('taskDueDate').value = '';
     document.getElementById('taskDueDate').dispatchEvent(new Event('input'));
@@ -762,12 +766,18 @@ async function addTask(){
 async function toggleTaskDone(id, val){
   try{
     await db.collection('tasks').doc(id).update({ done: val, doneAt: val ? firebase.firestore.FieldValue.serverTimestamp() : null });
+    const t = TASKS.find(x=>x.id===id);
+    logActivity(val ? 'إنجاز مهمة' : 'إعادة فتح مهمة', t ? t.text : id);
   }catch(e){ alert('تعذر التحديث: ' + e.message); }
 }
 
 async function deleteTask(id){
   if(!confirm('حذف هذه المهمة؟')) return;
-  try{ await db.collection('tasks').doc(id).delete(); }
+  const t = TASKS.find(x=>x.id===id);
+  try{
+    await db.collection('tasks').doc(id).delete();
+    logActivity('حذف مهمة', t ? t.text : id);
+  }
   catch(e){ alert('تعذر الحذف: ' + e.message); }
 }
 
@@ -830,17 +840,19 @@ async function sendChatAttachment(file){
 }
 
 
-/* ---------- سجل الدخول والخروج ---------- */
-function logLoginEvent(email, type){
-  db.collection('login_logs').add({
-    email, type,
+/* ---------- سجل الدخول والخروج والأعمال ---------- */
+function logActivity(type, details){
+  const email = auth.currentUser && auth.currentUser.email;
+  if(!email) return;
+  db.collection('activity_logs').add({
+    email, type, details: details || '',
     timestamp: firebase.firestore.FieldValue.serverTimestamp()
-  }).catch(err=> console.error('login log error', err));
+  }).catch(err=> console.error('activity log error', err));
 }
 
 function subscribeLoginLogs(){
   if(unsubscribeLoginLogs) unsubscribeLoginLogs();
-  unsubscribeLoginLogs = db.collection('login_logs').orderBy('timestamp','desc').limit(300).onSnapshot(snap=>{
+  unsubscribeLoginLogs = db.collection('activity_logs').orderBy('timestamp','desc').limit(300).onSnapshot(snap=>{
     LOGIN_LOGS = snap.docs.map(d=>({ id:d.id, ...d.data() }));
     renderLoginLogs();
   }, err=> console.error(err));
@@ -862,15 +874,25 @@ function fmtTimeOnly(ts){
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
+const LOG_TYPE_BADGE = {
+  'دخول':'badge-ok', 'خروج':'badge-unknown',
+  'إضافة موظف':'badge-renewing', 'تعديل موظف':'badge-soon',
+  'إضافة إجازة':'badge-seconded', 'حذف إجازة':'badge-critical',
+  'رفع مستند':'badge-renewing', 'حذف مستند':'badge-critical',
+  'إضافة مهمة':'badge-renewing', 'إنجاز مهمة':'badge-ok',
+  'إعادة فتح مهمة':'badge-soon', 'حذف مهمة':'badge-critical'
+};
+
 function renderLoginLogs(){
   const el = document.getElementById('loginLogsBody');
   if(!el) return;
-  if(!LOGIN_LOGS.length){ el.innerHTML = '<tr><td colspan="4" class="empty-state">لا يوجد سجل بعد</td></tr>'; return; }
+  if(!LOGIN_LOGS.length){ el.innerHTML = '<tr><td colspan="5" class="empty-state">لا يوجد سجل بعد</td></tr>'; return; }
   el.innerHTML = LOGIN_LOGS.map(l=>{
-    const badgeCls = l.type === 'دخول' ? 'badge-ok' : 'badge-unknown';
+    const badgeCls = LOG_TYPE_BADGE[l.type] || 'badge-unknown';
     return `<tr>
       <td>${l.email}</td>
       <td><span class="badge ${badgeCls}">${l.type}</span></td>
+      <td>${l.details || '—'}</td>
       <td>${fmtDayDate(l.timestamp)}</td>
       <td>${fmtTimeOnly(l.timestamp)}</td>
     </tr>`;
@@ -881,26 +903,27 @@ function exportLoginLogsExcel(){
   const rows = LOGIN_LOGS.map(l=>({
     'البريد الإلكتروني': l.email,
     'النوع': l.type,
+    'التفاصيل': l.details || '',
     'اليوم والتاريخ': fmtDayDate(l.timestamp),
     'الوقت': fmtTimeOnly(l.timestamp)
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'سجل الدخول والخروج');
-  XLSX.writeFile(wb, `سجل-الدخول-والخروج-${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, 'سجل الدخول والأعمال');
+  XLSX.writeFile(wb, `سجل-الدخول-والاعمال-${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function printLoginLogs(){
-  const rows = LOGIN_LOGS.map(l=>`<tr><td>${l.email}</td><td>${l.type}</td><td>${fmtDayDate(l.timestamp)}</td><td>${fmtTimeOnly(l.timestamp)}</td></tr>`).join('');
-  const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>سجل الدخول والخروج</title>
+  const rows = LOGIN_LOGS.map(l=>`<tr><td>${l.email}</td><td>${l.type}</td><td>${l.details||'—'}</td><td>${fmtDayDate(l.timestamp)}</td><td>${fmtTimeOnly(l.timestamp)}</td></tr>`).join('');
+  const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>سجل الدخول والأعمال</title>
   <style>
     body{ font-family:Arial,sans-serif; padding:30px; color:#111; }
     h1{ font-size:20px; border-bottom:3px solid #d4af37; padding-bottom:8px; }
     table{ width:100%; border-collapse:collapse; margin-top:14px; }
     td,th{ border:1px solid #ccc; padding:8px 10px; font-size:13px; text-align:right; }
   </style></head><body>
-  <h1>نظام الماسة للموارد البشرية — سجل الدخول والخروج</h1>
-  <table><tr><th>البريد الإلكتروني</th><th>النوع</th><th>اليوم والتاريخ</th><th>الوقت</th></tr>${rows}</table>
+  <h1>نظام الماسة للموارد البشرية — سجل الدخول والأعمال</h1>
+  <table><tr><th>البريد الإلكتروني</th><th>النوع</th><th>التفاصيل</th><th>اليوم والتاريخ</th><th>الوقت</th></tr>${rows}</table>
   <p style="margin-top:24px; font-size:11px; color:#777;">تم إنشاء هذا التقرير تلقائيًا بتاريخ ${fmtDate(new Date())}</p>
   </body></html>`;
   const w = window.open('', '_blank');
@@ -952,6 +975,8 @@ async function handleFiles(e){
         lastEditedBy: auth.currentUser.email,
         lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
+      const empForLog = EMPLOYEES.find(x=>x.id===activeEmployeeId);
+      logActivity('رفع مستند', `رفع مستند (${f.name}) لـ ${empForLog ? empForLog.name : activeEmployeeId}`);
     }catch(err){
       alert('فشل رفع الملف ' + f.name + ': ' + err.message);
     }
@@ -969,6 +994,8 @@ async function removeDoc(docId, path){
       lastEditedBy: auth.currentUser.email,
       lastEditedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    const empForLog = EMPLOYEES.find(x=>x.id===activeEmployeeId);
+    logActivity('حذف مستند', `حذف مستند لـ ${empForLog ? empForLog.name : activeEmployeeId}`);
     renderDocList();
     renderTable();
   }catch(e){ alert('تعذر الحذف: ' + e.message); }
