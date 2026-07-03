@@ -212,6 +212,21 @@
         </div>
         <p id="googleStatus" class="muted" style="margin-top:14px;"></p>
       </div>
+
+      <div class="settings-card" style="max-width:100%;">
+        <h3>سجل الدخول والخروج</h3>
+        <p>سجل تلقائي لكل عمليات دخول وخروج فريق الموارد البشرية من النظام (آخر 300 عملية)</p>
+        <div class="btn-row" style="margin-bottom:14px;">
+          <button class="btn-secondary" id="exportLoginLogsBtn">📥 تصدير Excel</button>
+          <button class="btn-secondary" id="printLoginLogsBtn">🖨️ طباعة</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>البريد الإلكتروني</th><th>النوع</th><th>اليوم والتاريخ</th><th>الوقت</th></tr></thead>
+            <tbody id="loginLogsBody"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
   </main>

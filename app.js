@@ -31,6 +31,8 @@ let unsubscribeEmployees = null;
 let unsubscribeTeam = null;
 let unsubscribeTasks = null;
 let unsubscribeChat = null;
+let unsubscribeLoginLogs = null;
+let LOGIN_LOGS = [];
 
 const CITIES = ['أبوظبي','دبي','الشارقة','عجمان','أم القيوين','رأس الخيمة','الفجيرة','العين'];
 const END_REASONS = ['استقالة','إنهاء خدمات','هروب','أخرى'];
@@ -156,6 +158,7 @@ function initAuth(){
     try{
       await auth.setPersistence(remember ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION);
       await auth.signInWithEmailAndPassword(email, pass);
+      logLoginEvent(email, 'دخول');
     }catch(ex){
       err.textContent = translateAuthError(ex.code);
       err.style.display = 'block';
@@ -163,10 +166,13 @@ function initAuth(){
   });
 
   document.getElementById('logoutBtn').addEventListener('click', ()=>{
+    const email = auth.currentUser && auth.currentUser.email;
+    if(email) logLoginEvent(email, 'خروج');
     if(unsubscribeEmployees) unsubscribeEmployees();
     if(unsubscribeTeam) unsubscribeTeam();
     if(unsubscribeTasks) unsubscribeTasks();
     if(unsubscribeChat) unsubscribeChat();
+    if(unsubscribeLoginLogs) unsubscribeLoginLogs();
     auth.signOut();
   });
 }
@@ -203,6 +209,7 @@ async function boot(){
   subscribeTeam();
   subscribeTasks();
   subscribeChat();
+  subscribeLoginLogs();
 }
 
 function sanitizeEmailId(email){
@@ -823,6 +830,86 @@ async function sendChatAttachment(file){
 }
 
 
+/* ---------- سجل الدخول والخروج ---------- */
+function logLoginEvent(email, type){
+  db.collection('login_logs').add({
+    email, type,
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(err=> console.error('login log error', err));
+}
+
+function subscribeLoginLogs(){
+  if(unsubscribeLoginLogs) unsubscribeLoginLogs();
+  unsubscribeLoginLogs = db.collection('login_logs').orderBy('timestamp','desc').limit(300).onSnapshot(snap=>{
+    LOGIN_LOGS = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    renderLoginLogs();
+  }, err=> console.error(err));
+}
+
+function fmtDayDate(ts){
+  if(!ts) return '—';
+  const d = (ts && typeof ts.toDate === 'function') ? ts.toDate() : new Date(ts);
+  if(isNaN(d.getTime())) return '—';
+  const days = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+  const day = String(d.getDate()).padStart(2,'0');
+  const month = String(d.getMonth()+1).padStart(2,'0');
+  return `${days[d.getDay()]} ${day}/${month}/${d.getFullYear()}`;
+}
+function fmtTimeOnly(ts){
+  if(!ts) return '—';
+  const d = (ts && typeof ts.toDate === 'function') ? ts.toDate() : new Date(ts);
+  if(isNaN(d.getTime())) return '—';
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function renderLoginLogs(){
+  const el = document.getElementById('loginLogsBody');
+  if(!el) return;
+  if(!LOGIN_LOGS.length){ el.innerHTML = '<tr><td colspan="4" class="empty-state">لا يوجد سجل بعد</td></tr>'; return; }
+  el.innerHTML = LOGIN_LOGS.map(l=>{
+    const badgeCls = l.type === 'دخول' ? 'badge-ok' : 'badge-unknown';
+    return `<tr>
+      <td>${l.email}</td>
+      <td><span class="badge ${badgeCls}">${l.type}</span></td>
+      <td>${fmtDayDate(l.timestamp)}</td>
+      <td>${fmtTimeOnly(l.timestamp)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function exportLoginLogsExcel(){
+  const rows = LOGIN_LOGS.map(l=>({
+    'البريد الإلكتروني': l.email,
+    'النوع': l.type,
+    'اليوم والتاريخ': fmtDayDate(l.timestamp),
+    'الوقت': fmtTimeOnly(l.timestamp)
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'سجل الدخول والخروج');
+  XLSX.writeFile(wb, `سجل-الدخول-والخروج-${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function printLoginLogs(){
+  const rows = LOGIN_LOGS.map(l=>`<tr><td>${l.email}</td><td>${l.type}</td><td>${fmtDayDate(l.timestamp)}</td><td>${fmtTimeOnly(l.timestamp)}</td></tr>`).join('');
+  const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>سجل الدخول والخروج</title>
+  <style>
+    body{ font-family:Arial,sans-serif; padding:30px; color:#111; }
+    h1{ font-size:20px; border-bottom:3px solid #d4af37; padding-bottom:8px; }
+    table{ width:100%; border-collapse:collapse; margin-top:14px; }
+    td,th{ border:1px solid #ccc; padding:8px 10px; font-size:13px; text-align:right; }
+  </style></head><body>
+  <h1>نظام الماسة للموارد البشرية — سجل الدخول والخروج</h1>
+  <table><tr><th>البريد الإلكتروني</th><th>النوع</th><th>اليوم والتاريخ</th><th>الوقت</th></tr>${rows}</table>
+  <p style="margin-top:24px; font-size:11px; color:#777;">تم إنشاء هذا التقرير تلقائيًا بتاريخ ${fmtDate(new Date())}</p>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  w.onload = ()=> w.print();
+}
+
+
 /* ---------- المستندات (Firebase Storage + Firestore) ---------- */
 function docsRef(empId){
   return db.collection('employees').doc(String(empId)).collection('documents');
@@ -1108,6 +1195,8 @@ function bindUI(){
   document.getElementById('connectGoogleBtn').addEventListener('click', connectGoogle);
   document.getElementById('saveClientIdBtn').addEventListener('click', saveGoogleClientId);
   document.getElementById('addCalendarEventsBtn').addEventListener('click', addExpiryEventsToCalendar);
+  document.getElementById('exportLoginLogsBtn').addEventListener('click', exportLoginLogsExcel);
+  document.getElementById('printLoginLogsBtn').addEventListener('click', printLoginLogs);
 
   const kpiLabels = {
     total:'', passport:'انتهاء الجواز', eid:'انتهاء الهوية', workcard:'انتهاء بطاقة العمل',
