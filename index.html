@@ -105,6 +105,18 @@
           <div class="kpi-num" id="kpiPresent">0</div>
           <div class="kpi-label">على الدوام</div>
         </div>
+        <div class="kpi-card kpi-ok" data-kpi="new">
+          <div class="kpi-num" id="kpiNew">0</div>
+          <div class="kpi-label">موظفين جدد</div>
+        </div>
+        <div class="kpi-card kpi-soon" data-kpi="cancelling">
+          <div class="kpi-num" id="kpiCancelling">0</div>
+          <div class="kpi-label">قيد الإلغاء / إنهاء الخدمات</div>
+        </div>
+        <div class="kpi-card kpi-critical" data-kpi="terminated">
+          <div class="kpi-num" id="kpiTerminated">0</div>
+          <div class="kpi-label">منتهية الخدمة</div>
+        </div>
       </div>
 
       <div class="chart-card">
@@ -124,6 +136,11 @@
           <option value="critical">حرجة</option>
           <option value="renewing">تحت التجديد</option>
           <option value="seconded">إعارة</option>
+          <option value="new">موظف جديد</option>
+          <option value="cancelling">قيد الإلغاء</option>
+          <option value="terminating">قيد إنهاء الخدمات</option>
+          <option value="cancelled">تم الإلغاء</option>
+          <option value="terminated">تم إنهاء الخدمات</option>
         </select>
         <button class="btn-secondary" id="exportIcsBtn">📅 تصدير تذكيرات (ICS)</button>
         <button class="btn-secondary" id="exportAllExcelBtn">📊 تصدير الكل (Excel)</button>

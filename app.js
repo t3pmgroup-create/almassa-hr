@@ -46,9 +46,33 @@ function daysUntil(dateStr){
   return Math.round((d - today) / 86400000);
 }
 
-const CRITICAL_NOTES = ['هروب','مرفوض تجديد إقامة','تم الكنسلة'];
+const CRITICAL_NOTES = ['هروب','مرفوض تجديد إقامة'];
+
+const MANUAL_STATUS_OPTIONS = ['هروب','مرفوض تجديد إقامة','تحت التجديد','قيد الإلغاء','تم الإلغاء','قيد إنهاء الخدمات','تم إنهاء الخدمات','إعارة','موظف جديد','أخرى'];
+
+const MANUAL_STATUS_CONFIG = {
+  'هروب': { key:'critical', cls:'badge-critical' },
+  'مرفوض تجديد إقامة': { key:'critical', cls:'badge-critical' },
+  'تحت التجديد': { key:'renewing', cls:'badge-renewing' },
+  'قيد الإلغاء': { key:'cancelling', cls:'badge-soon' },
+  'تم الإلغاء': { key:'cancelled', cls:'badge-critical' },
+  'قيد إنهاء الخدمات': { key:'terminating', cls:'badge-soon' },
+  'تم إنهاء الخدمات': { key:'terminated', cls:'badge-critical' },
+  'إعارة': { key:'seconded', cls:'badge-seconded' },
+  'موظف جديد': { key:'new', cls:'badge-ok' },
+  'أخرى': { key:'other', cls:'badge-unknown' }
+};
 
 function getStatus(emp){
+  if(emp.manualStatus && MANUAL_STATUS_CONFIG[emp.manualStatus]){
+    const cfg = MANUAL_STATUS_CONFIG[emp.manualStatus];
+    const label = emp.manualStatus === 'أخرى' ? (emp.manualStatusReason || 'أخرى') : emp.manualStatus;
+    return { key:cfg.key, label, cls:cfg.cls };
+  }
+  // توافق مع البيانات القديمة المستوردة (الحالة كانت مكتوبة داخل حقل الملاحظة)
+  if(emp.note && emp.note.includes('تم الكنسلة')){
+    return { key:'cancelled', label:'تم الإلغاء', cls:'badge-critical' };
+  }
   if(emp.note && CRITICAL_NOTES.some(n => emp.note.includes(n))){
     return { key:'critical', label: emp.note, cls:'badge-critical' };
   }
@@ -289,7 +313,7 @@ function setSyncStatus(text){
 /* ---------- واجهة KPI ---------- */
 function renderKPIs(){
   const total = EMPLOYEES.length;
-  let passport=0, eid=0, workCard=0, residency=0, annual=0, sick=0, onLeaveAny=0;
+  let passport=0, eid=0, workCard=0, residency=0, annual=0, sick=0, onLeaveAny=0, newEmp=0, cancelling=0, terminated=0;
   EMPLOYEES.forEach(e=>{
     if(isDocIssue(e.passportExp)) passport++;
     if(isDocIssue(e.emiratesIdExp)) eid++;
@@ -298,6 +322,10 @@ function renderKPIs(){
     if(isOnLeaveToday(e,'سنوية')) annual++;
     if(isOnLeaveToday(e,'مرضية')) sick++;
     if(isOnLeaveToday(e)) onLeaveAny++;
+    const sKey = getStatus(e).key;
+    if(sKey === 'new') newEmp++;
+    if(sKey === 'cancelling' || sKey === 'terminating') cancelling++;
+    if(sKey === 'cancelled' || sKey === 'terminated') terminated++;
   });
   document.getElementById('kpiTotal').textContent = total;
   document.getElementById('kpiTotalLabel').textContent = total;
@@ -308,6 +336,9 @@ function renderKPIs(){
   document.getElementById('kpiAnnualLeave').textContent = annual;
   document.getElementById('kpiSickLeave').textContent = sick;
   document.getElementById('kpiPresent').textContent = total - onLeaveAny;
+  document.getElementById('kpiNew').textContent = newEmp;
+  document.getElementById('kpiCancelling').textContent = cancelling;
+  document.getElementById('kpiTerminated').textContent = terminated;
 }
 
 /* ---------- رسم بياني حسب الجنسية ---------- */
@@ -365,6 +396,9 @@ function matchesKpi(e, kpi){
     case 'annual': return isOnLeaveToday(e,'سنوية');
     case 'sick': return isOnLeaveToday(e,'مرضية');
     case 'present': return !isOnLeaveToday(e);
+    case 'new': return getStatus(e).key === 'new';
+    case 'cancelling': return ['cancelling','terminating'].includes(getStatus(e).key);
+    case 'terminated': return ['cancelled','terminated'].includes(getStatus(e).key);
     default: return true;
   }
 }
@@ -448,6 +482,7 @@ function renderTable(){
 /* ---------- نافذة تفاصيل/تعديل/إضافة الموظف ---------- */
 function emptyEmployee(){
   return { name:'', nationality:'', company:'', workCardExp:'', workCardNumber:'', residencyIssue:'', residencyExp:'', note:'',
+    manualStatus:'', manualStatusReason:'',
     passportExp:'', passportNumber:'', emiratesIdExp:'', emiratesIdNumber:'', phone:'', email:'', address:'', city:'', education:'', jobTitle:'',
     insuranceNumber:'', insuranceCompany:'', employmentStart:'', employmentEnd:'', employmentEndReason:'',
     salaryBasic:0, salaryAllowances:0, leaves:[] };
@@ -484,6 +519,16 @@ function openEmployeeModal(id){
       <div class="field"><label class="lbl">المهنة في الشركة</label><input type="text" id="editJobTitle" value="${emp.jobTitle||''}"></div>
       <div class="field"><label class="lbl">المؤهل الدراسي</label><input type="text" id="editEducation" value="${emp.education||''}"></div>
       <div class="field"><label class="lbl">ملاحظة</label><input type="text" id="editNote" value="${emp.note||''}"></div>
+      <div class="field"><label class="lbl">الحالة اليدوية</label>
+        <select id="editManualStatus">
+          <option value="">— بدون (تُحسب تلقائيًا من التواريخ)</option>
+          ${MANUAL_STATUS_OPTIONS.map(s=>`<option value="${s}" ${emp.manualStatus===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field" id="manualStatusReasonWrap" style="${emp.manualStatus==='أخرى'?'':'display:none;'}">
+        <label class="lbl">السبب (لحالة أخرى)</label>
+        <input type="text" id="editManualStatusReason" value="${emp.manualStatusReason||''}">
+      </div>
     </div>
 
     <h4 class="section-title" style="margin-top:18px;">التواصل والسكن</h4>
@@ -565,6 +610,10 @@ function openEmployeeModal(id){
   allowInput.addEventListener('input', updateTotal);
   attachDatePreviews(document.getElementById('modalBody'));
 
+  document.getElementById('editManualStatus').addEventListener('change', (e)=>{
+    document.getElementById('manualStatusReasonWrap').style.display = (e.target.value === 'أخرى') ? '' : 'none';
+  });
+
   document.getElementById('saveEmpBtn').addEventListener('click', isNew ? addNewEmployee : saveEmployeeEdits);
 
   if(!isNew){
@@ -586,6 +635,8 @@ function collectEmployeeForm(){
     jobTitle: document.getElementById('editJobTitle').value.trim(),
     education: document.getElementById('editEducation').value.trim(),
     note: document.getElementById('editNote').value || '',
+    manualStatus: document.getElementById('editManualStatus').value || '',
+    manualStatusReason: document.getElementById('editManualStatusReason') ? document.getElementById('editManualStatusReason').value.trim() : '',
     phone: document.getElementById('editPhone').value.trim(),
     email: document.getElementById('editEmail').value.trim(),
     city: document.getElementById('editCity').value,
@@ -612,6 +663,10 @@ async function addNewEmployee(){
   const status = document.getElementById('saveEmpStatus');
   const data = collectEmployeeForm();
   if(!data.name){ status.textContent = 'الاسم مطلوب'; return; }
+  if(data.manualStatus === 'أخرى' && !data.manualStatusReason){
+    status.textContent = 'اكتب السبب عند اختيار حالة "أخرى"';
+    return;
+  }
   status.textContent = 'جاري الإضافة...';
   const newId = EMPLOYEES.length ? Math.max(...EMPLOYEES.map(e=>e.id)) + 1 : 1;
   data.id = newId;
@@ -632,6 +687,10 @@ async function saveEmployeeEdits(){
   const status = document.getElementById('saveEmpStatus');
   status.textContent = 'جاري الحفظ...';
   const updates = collectEmployeeForm();
+  if(updates.manualStatus === 'أخرى' && !updates.manualStatusReason){
+    status.textContent = 'اكتب السبب عند اختيار حالة "أخرى"';
+    return;
+  }
   updates.lastEditedBy = auth.currentUser.email;
   updates.lastEditedAt = firebase.firestore.FieldValue.serverTimestamp();
   try{
@@ -1012,6 +1071,7 @@ const EXCEL_FIELD_MAP = [
   ['insuranceNumber','رقم التأمين الصحي'],['insuranceCompany','شركة التأمين'],
   ['employmentStart','تاريخ بدء العمل'],['employmentEnd','تاريخ انتهاء العمل'],['employmentEndReason','سبب انتهاء العمل'],
   ['salaryBasic','الراتب الأساسي'],['salaryAllowances','البدلات'],
+  ['manualStatus','الحالة اليدوية'],['manualStatusReason','سبب الحالة (أخرى)'],
   ['note','ملاحظة']
 ];
 
@@ -1227,7 +1287,8 @@ function bindUI(){
 
   const kpiLabels = {
     total:'', passport:'انتهاء الجواز', eid:'انتهاء الهوية', workcard:'انتهاء بطاقة العمل',
-    residency:'انتهاء الإقامة', annual:'في إجازة سنوية', sick:'في إجازة مرضية', present:'على الدوام'
+    residency:'انتهاء الإقامة', annual:'في إجازة سنوية', sick:'في إجازة مرضية', present:'على الدوام',
+    new:'موظفين جدد', cancelling:'قيد الإلغاء / إنهاء الخدمات', terminated:'منتهية الخدمة'
   };
   document.querySelectorAll('.kpi-card').forEach(c=>{
     c.addEventListener('click', ()=>{
