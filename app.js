@@ -49,6 +49,8 @@ function daysUntil(dateStr){
 const CRITICAL_NOTES = ['هروب','مرفوض تجديد إقامة'];
 
 const MANUAL_STATUS_OPTIONS = ['هروب','مرفوض تجديد إقامة','تحت التجديد','قيد الإلغاء','تم الإلغاء','قيد إنهاء الخدمات','تم إنهاء الخدمات','إعارة','موظف جديد','أخرى'];
+const REPORT_AUTHORITIES = ['وزارة الموارد البشرية والتوطين','هيئة الهوية والجنسية والإقامة'];
+const DISPUTE_AUTHORITIES = ['الشرطة','المحاكم','وزارة الموارد البشرية والتوطين','هيئة الهوية والجنسية والإقامة'];
 
 const MANUAL_STATUS_CONFIG = {
   'هروب': { key:'critical', cls:'badge-critical' },
@@ -313,7 +315,7 @@ function setSyncStatus(text){
 /* ---------- واجهة KPI ---------- */
 function renderKPIs(){
   const total = EMPLOYEES.length;
-  let passport=0, eid=0, workCard=0, residency=0, annual=0, sick=0, onLeaveAny=0, newEmp=0, cancelling=0, terminated=0;
+  let passport=0, eid=0, workCard=0, residency=0, annual=0, sick=0, onLeaveAny=0, newEmp=0, cancelling=0, terminated=0, absconding=0, renewalRejected=0, laborDispute=0;
   EMPLOYEES.forEach(e=>{
     if(isDocIssue(e.passportExp)) passport++;
     if(isDocIssue(e.emiratesIdExp)) eid++;
@@ -326,6 +328,9 @@ function renderKPIs(){
     if(sKey === 'new') newEmp++;
     if(sKey === 'cancelling' || sKey === 'terminating') cancelling++;
     if(sKey === 'cancelled' || sKey === 'terminated') terminated++;
+    if(hasStatusValue(e,'هروب')) absconding++;
+    if(hasStatusValue(e,'مرفوض تجديد إقامة')) renewalRejected++;
+    if(e.hasLaborDispute) laborDispute++;
   });
   document.getElementById('kpiTotal').textContent = total;
   document.getElementById('kpiTotalLabel').textContent = total;
@@ -339,6 +344,9 @@ function renderKPIs(){
   document.getElementById('kpiNew').textContent = newEmp;
   document.getElementById('kpiCancelling').textContent = cancelling;
   document.getElementById('kpiTerminated').textContent = terminated;
+  document.getElementById('kpiAbsconding').textContent = absconding;
+  document.getElementById('kpiRenewalRejected').textContent = renewalRejected;
+  document.getElementById('kpiLaborDispute').textContent = laborDispute;
 }
 
 /* ---------- رسم بياني حسب الجنسية ---------- */
@@ -387,6 +395,10 @@ function normalizeAr(s){
     .toLowerCase();
 }
 
+function hasStatusValue(emp, value){
+  return emp.manualStatus === value || (emp.note && emp.note.includes(value));
+}
+
 function matchesKpi(e, kpi){
   switch(kpi){
     case 'passport': return isDocIssue(e.passportExp);
@@ -399,6 +411,9 @@ function matchesKpi(e, kpi){
     case 'new': return getStatus(e).key === 'new';
     case 'cancelling': return ['cancelling','terminating'].includes(getStatus(e).key);
     case 'terminated': return ['cancelled','terminated'].includes(getStatus(e).key);
+    case 'absconding': return hasStatusValue(e,'هروب');
+    case 'renewal_rejected': return hasStatusValue(e,'مرفوض تجديد إقامة');
+    case 'labor_dispute': return !!e.hasLaborDispute;
     default: return true;
   }
 }
@@ -482,7 +497,9 @@ function renderTable(){
 /* ---------- نافذة تفاصيل/تعديل/إضافة الموظف ---------- */
 function emptyEmployee(){
   return { name:'', nationality:'', company:'', workCardExp:'', workCardNumber:'', residencyIssue:'', residencyExp:'', note:'',
-    manualStatus:'', manualStatusReason:'',
+    manualStatus:'', manualStatusReason:'', renewalRejectedNote:'',
+    abscondingDate:'', abscondingAuthorities:[],
+    hasLaborDispute:false, laborDisputeDate:'', laborDisputeAuthorities:[], laborDisputeNote:'',
     passportExp:'', passportNumber:'', emiratesIdExp:'', emiratesIdNumber:'', phone:'', email:'', address:'', city:'', education:'', jobTitle:'',
     insuranceNumber:'', insuranceCompany:'', employmentStart:'', employmentEnd:'', employmentEndReason:'',
     salaryBasic:0, salaryAllowances:0, leaves:[] };
@@ -529,6 +546,21 @@ function openEmployeeModal(id){
         <label class="lbl">السبب (لحالة أخرى)</label>
         <input type="text" id="editManualStatusReason" value="${emp.manualStatusReason||''}">
       </div>
+      <div class="field" id="renewalRejectedNoteWrap" style="${emp.manualStatus==='مرفوض تجديد إقامة'?'':'display:none;'} grid-column:1/-1;">
+        <label class="lbl">ملاحظة رفض التجديد</label>
+        <input type="text" id="editRenewalRejectedNote" value="${emp.renewalRejectedNote||''}">
+      </div>
+      <div id="abscondingWrap" style="${emp.manualStatus==='هروب'?'':'display:none;'} grid-column:1/-1;">
+        <div class="modal-grid">
+          <div class="field"><label class="lbl">تاريخ بلاغ الهروب</label><input type="date" id="editAbscondingDate" value="${emp.abscondingDate||''}"></div>
+          <div class="field">
+            <label class="lbl">جهة البلاغ</label>
+            ${REPORT_AUTHORITIES.map((a,i)=>`<label style="display:flex; align-items:center; gap:6px; font-size:13px; margin-top:6px;">
+              <input type="checkbox" class="abscondingAuthorityChk" value="${a}" ${(emp.abscondingAuthorities||[]).includes(a)?'checked':''}> ${a}
+            </label>`).join('')}
+          </div>
+        </div>
+      </div>
     </div>
 
     <h4 class="section-title" style="margin-top:18px;">التواصل والسكن</h4>
@@ -555,6 +587,27 @@ function openEmployeeModal(id){
     <div class="modal-grid">
       <div class="field"><label class="lbl">رقم التأمين الصحي</label><input type="text" id="editInsuranceNumber" value="${emp.insuranceNumber||''}"></div>
       <div class="field"><label class="lbl">شركة التأمين</label><input type="text" id="editInsuranceCompany" value="${emp.insuranceCompany||''}"></div>
+    </div>
+
+    <h4 class="section-title" style="margin-top:18px;">منازعة عمالية</h4>
+    <div class="modal-grid">
+      <div class="field">
+        <label style="display:flex; align-items:center; gap:8px; font-size:14px; font-weight:700;">
+          <input type="checkbox" id="editHasLaborDispute" ${emp.hasLaborDispute ? 'checked':''}> يوجد منازعة عمالية
+        </label>
+      </div>
+    </div>
+    <div id="laborDisputeWrap" style="${emp.hasLaborDispute ? '' : 'display:none;'} margin-top:10px;">
+      <div class="modal-grid">
+        <div class="field"><label class="lbl">تاريخ المنازعة</label><input type="date" id="editLaborDisputeDate" value="${emp.laborDisputeDate||''}"></div>
+        <div class="field">
+          <label class="lbl">الجهة</label>
+          ${DISPUTE_AUTHORITIES.map(a=>`<label style="display:flex; align-items:center; gap:6px; font-size:13px; margin-top:6px;">
+            <input type="checkbox" class="laborDisputeAuthorityChk" value="${a}" ${(emp.laborDisputeAuthorities||[]).includes(a)?'checked':''}> ${a}
+          </label>`).join('')}
+        </div>
+        <div class="field" style="grid-column:1/-1;"><label class="lbl">ملاحظة المنازعة (قابلة للتحديث)</label><input type="text" id="editLaborDisputeNote" value="${emp.laborDisputeNote||''}"></div>
+      </div>
     </div>
 
     <h4 class="section-title" style="margin-top:18px;">التوظيف والراتب</h4>
@@ -612,6 +665,11 @@ function openEmployeeModal(id){
 
   document.getElementById('editManualStatus').addEventListener('change', (e)=>{
     document.getElementById('manualStatusReasonWrap').style.display = (e.target.value === 'أخرى') ? '' : 'none';
+    document.getElementById('renewalRejectedNoteWrap').style.display = (e.target.value === 'مرفوض تجديد إقامة') ? '' : 'none';
+    document.getElementById('abscondingWrap').style.display = (e.target.value === 'هروب') ? '' : 'none';
+  });
+  document.getElementById('editHasLaborDispute').addEventListener('change', (e)=>{
+    document.getElementById('laborDisputeWrap').style.display = e.target.checked ? '' : 'none';
   });
 
   document.getElementById('saveEmpBtn').addEventListener('click', isNew ? addNewEmployee : saveEmployeeEdits);
@@ -637,6 +695,13 @@ function collectEmployeeForm(){
     note: document.getElementById('editNote').value || '',
     manualStatus: document.getElementById('editManualStatus').value || '',
     manualStatusReason: document.getElementById('editManualStatusReason') ? document.getElementById('editManualStatusReason').value.trim() : '',
+    renewalRejectedNote: document.getElementById('editRenewalRejectedNote') ? document.getElementById('editRenewalRejectedNote').value.trim() : '',
+    abscondingDate: document.getElementById('editAbscondingDate') ? (document.getElementById('editAbscondingDate').value || null) : null,
+    abscondingAuthorities: Array.from(document.querySelectorAll('.abscondingAuthorityChk:checked')).map(c=>c.value),
+    hasLaborDispute: document.getElementById('editHasLaborDispute') ? document.getElementById('editHasLaborDispute').checked : false,
+    laborDisputeDate: document.getElementById('editLaborDisputeDate') ? (document.getElementById('editLaborDisputeDate').value || null) : null,
+    laborDisputeAuthorities: Array.from(document.querySelectorAll('.laborDisputeAuthorityChk:checked')).map(c=>c.value),
+    laborDisputeNote: document.getElementById('editLaborDisputeNote') ? document.getElementById('editLaborDisputeNote').value.trim() : '',
     phone: document.getElementById('editPhone').value.trim(),
     email: document.getElementById('editEmail').value.trim(),
     city: document.getElementById('editCity').value,
@@ -1072,12 +1137,21 @@ const EXCEL_FIELD_MAP = [
   ['employmentStart','تاريخ بدء العمل'],['employmentEnd','تاريخ انتهاء العمل'],['employmentEndReason','سبب انتهاء العمل'],
   ['salaryBasic','الراتب الأساسي'],['salaryAllowances','البدلات'],
   ['manualStatus','الحالة اليدوية'],['manualStatusReason','سبب الحالة (أخرى)'],
+  ['renewalRejectedNote','ملاحظة رفض التجديد'],
+  ['abscondingDate','تاريخ بلاغ الهروب'],['abscondingAuthorities','جهة بلاغ الهروب'],
+  ['hasLaborDispute','يوجد منازعة عمالية'],['laborDisputeDate','تاريخ المنازعة'],
+  ['laborDisputeAuthorities','جهة المنازعة'],['laborDisputeNote','ملاحظة المنازعة'],
   ['note','ملاحظة']
 ];
 
 function employeeToRow(e){
   const row = {};
-  EXCEL_FIELD_MAP.forEach(([key,label])=>{ row[label] = e[key] ?? ''; });
+  EXCEL_FIELD_MAP.forEach(([key,label])=>{
+    let val = e[key] ?? '';
+    if(Array.isArray(val)) val = val.join('، ');
+    if(typeof val === 'boolean') val = val ? 'نعم' : 'لا';
+    row[label] = val;
+  });
   row['الراتب الإجمالي'] = (parseFloat(e.salaryBasic)||0) + (parseFloat(e.salaryAllowances)||0);
   return row;
 }
@@ -1109,6 +1183,19 @@ function printEmployee(emp){
   const s = getStatus(emp);
   const salaryTotal = (parseFloat(emp.salaryBasic)||0) + (parseFloat(emp.salaryAllowances)||0);
   const leaveRows = (emp.leaves||[]).map(l=>`<tr><td>${l.type}</td><td>${l.reason||'—'}</td><td>${fmtDate(l.startDate)}</td><td>${fmtDate(l.endDate)}</td><td>${l.days}</td></tr>`).join('');
+  let extraStatusHtml = '';
+  if(emp.manualStatus === 'هروب'){
+    extraStatusHtml += `<div class="section">تفاصيل بلاغ الهروب</div>
+    <table><tr><td>تاريخ البلاغ</td><td>${fmtDate(emp.abscondingDate)}</td><td>جهة البلاغ</td><td>${(emp.abscondingAuthorities||[]).join('، ')||'—'}</td></tr></table>`;
+  }
+  if(emp.manualStatus === 'مرفوض تجديد إقامة' && emp.renewalRejectedNote){
+    extraStatusHtml += `<div class="section">ملاحظة رفض التجديد</div><table><tr><td>${emp.renewalRejectedNote}</td></tr></table>`;
+  }
+  if(emp.hasLaborDispute){
+    extraStatusHtml += `<div class="section">تفاصيل المنازعة العمالية</div>
+    <table><tr><td>تاريخ المنازعة</td><td>${fmtDate(emp.laborDisputeDate)}</td><td>الجهة</td><td>${(emp.laborDisputeAuthorities||[]).join('، ')||'—'}</td></tr>
+    <tr><td>ملاحظة</td><td colspan="3">${emp.laborDisputeNote||'—'}</td></tr></table>`;
+  }
   const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>${emp.name}</title>
   <style>
     body{ font-family:Arial,sans-serif; padding:30px; color:#111; }
@@ -1139,6 +1226,7 @@ function printEmployee(emp){
     <tr><td>تاريخ بدء العمل</td><td>${fmtDate(emp.employmentStart)}</td><td>تاريخ انتهاء العمل</td><td>${fmtDate(emp.employmentEnd)}</td></tr>
     <tr><td>سبب انتهاء العمل</td><td>${emp.employmentEndReason||'—'}</td><td>الراتب الإجمالي</td><td>${salaryTotal.toLocaleString('en-US')} د.إ</td></tr>
   </table>
+  ${extraStatusHtml}
   ${leaveRows ? `<div class="section">الإجازات</div><table><tr><th>النوع</th><th>السبب</th><th>البداية</th><th>النهاية</th><th>عدد الأيام</th></tr>${leaveRows}</table>` : ''}
   <p style="margin-top:24px; font-size:11px; color:#777;">تم إنشاء هذا التقرير تلقائيًا من نظام الماسة للموارد البشرية بتاريخ ${fmtDate(new Date())}</p>
   </body></html>`;
@@ -1288,7 +1376,8 @@ function bindUI(){
   const kpiLabels = {
     total:'', passport:'انتهاء الجواز', eid:'انتهاء الهوية', workcard:'انتهاء بطاقة العمل',
     residency:'انتهاء الإقامة', annual:'في إجازة سنوية', sick:'في إجازة مرضية', present:'على الدوام',
-    new:'موظفين جدد', cancelling:'قيد الإلغاء / إنهاء الخدمات', terminated:'منتهية الخدمة'
+    new:'موظفين جدد', cancelling:'قيد الإلغاء / إنهاء الخدمات', terminated:'منتهية الخدمة',
+    absconding:'بلاغ هروب', renewal_rejected:'رفض التجديد', labor_dispute:'منازعة عمالية'
   };
   document.querySelectorAll('.kpi-card').forEach(c=>{
     c.addEventListener('click', ()=>{
