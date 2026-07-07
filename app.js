@@ -478,9 +478,19 @@ function getColumnConfig(kpi){
   }
 }
 
+const STATUS_SEVERITY = {
+  'critical':1, 'cancelled':2, 'terminated':2, 'expired':3,
+  'cancelling':4, 'terminating':4, 'soon':5, 'other':6,
+  'renewing':7, 'seconded':8, 'new':9, 'unknown':10, 'ok':11
+};
+
 /* ---------- الجدول ---------- */
 function renderTable(){
-  const list = applyFilters(EMPLOYEES);
+  const list = applyFilters(EMPLOYEES).slice().sort((a,b)=>{
+    const ra = STATUS_SEVERITY[getStatus(a).key] ?? 99;
+    const rb = STATUS_SEVERITY[getStatus(b).key] ?? 99;
+    return ra - rb;
+  });
   const tbody = document.getElementById('tableBody');
   document.getElementById('resultCount').textContent = `${list.length} من ${EMPLOYEES.length}`;
   const col = getColumnConfig(currentFilter.kpi);
