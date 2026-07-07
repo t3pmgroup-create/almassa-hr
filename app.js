@@ -158,6 +158,10 @@ function daysBetween(a,b){
   return Math.round((new Date(b) - new Date(a)) / 86400000);
 }
 
+function getEmployeeNumber(id){
+  return 'AM-' + String(id).padStart(4,'0');
+}
+
 /* ---------- الإجازات ---------- */
 function isOnLeaveToday(emp, type){
   if(!emp.leaves || !emp.leaves.length) return false;
@@ -444,12 +448,13 @@ function applyFilters(list){
       const q = normalizeAr(currentFilter.q);
       const qRaw = currentFilter.q.trim().toLowerCase();
       const matchName = normalizeAr(e.name).includes(q);
+      const matchEmpNum = getEmployeeNumber(e.id).toLowerCase().includes(qRaw) || String(e.id).includes(qRaw);
       const matchPhone = (e.phone||'').toLowerCase().includes(qRaw);
       const matchEmail = (e.email||'').toLowerCase().includes(qRaw);
       const matchWorkCard = (e.workCardNumber||'').toLowerCase().includes(qRaw);
       const matchPassport = (e.passportNumber||'').toLowerCase().includes(qRaw);
       const matchEid = (e.emiratesIdNumber||'').toLowerCase().includes(qRaw);
-      if(!matchName && !matchPhone && !matchEmail && !matchWorkCard && !matchPassport && !matchEid) return false;
+      if(!matchName && !matchEmpNum && !matchPhone && !matchEmail && !matchWorkCard && !matchPassport && !matchEid) return false;
     }
     if(currentFilter.company && e.company !== currentFilter.company) return false;
     if(currentFilter.nationality && e.nationality !== currentFilter.nationality) return false;
@@ -486,28 +491,41 @@ const STATUS_SEVERITY = {
 
 /* ---------- الجدول ---------- */
 function renderTable(){
+  const col = getColumnConfig(currentFilter.kpi);
   const list = applyFilters(EMPLOYEES).slice().sort((a,b)=>{
     const ra = STATUS_SEVERITY[getStatus(a).key] ?? 99;
     const rb = STATUS_SEVERITY[getStatus(b).key] ?? 99;
-    return ra - rb;
+    if(ra !== rb) return ra - rb;
+    const da = daysUntil(col.exp(a));
+    const db = daysUntil(col.exp(b));
+    const va = da === null ? Infinity : da;
+    const vb = db === null ? Infinity : db;
+    return va - vb;
   });
   const tbody = document.getElementById('tableBody');
   document.getElementById('resultCount').textContent = `${list.length} من ${EMPLOYEES.length}`;
-  const col = getColumnConfig(currentFilter.kpi);
   document.getElementById('colIssueHeader').textContent = col.issueLabel;
   document.getElementById('colExpHeader').textContent = col.expLabel;
   if(list.length === 0){
-    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">لا توجد نتائج مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="empty-state">لا توجد نتائج مطابقة</td></tr>`;
     return;
   }
-  tbody.innerHTML = list.map(e=>{
+  tbody.innerHTML = list.map((e,idx)=>{
     const s = getStatus(e);
+    const d = daysUntil(col.exp(e));
+    let daysLeftText = '—';
+    if(d !== null){
+      daysLeftText = d < 0 ? `منتهي منذ ${Math.abs(d)} يوم` : `خلال ${d} يوم`;
+    }
     return `<tr data-id="${e.id}" class="row-clickable">
+      <td>${idx+1}</td>
       <td class="cell-name">${e.name}</td>
+      <td>${getEmployeeNumber(e.id)}</td>
       <td>${e.nationality || '—'}</td>
       <td>${e.company || '—'}</td>
       <td>${fmtDate(col.issue(e))}</td>
       <td>${fmtDate(col.exp(e))}</td>
+      <td>${daysLeftText}</td>
       <td><span class="badge ${s.cls}">${s.label}</span></td>
       <td class="cell-docs" id="docCount_${e.id}">…</td>
     </tr>`;
@@ -539,7 +557,7 @@ function openEmployeeModal(id){
   const isNew = (id === null);
   const emp = isNew ? emptyEmployee() : EMPLOYEES.find(e=>e.id===id);
   if(!emp) return;
-  document.getElementById('modalTitle').textContent = isNew ? 'إضافة موظف جديد' : emp.name;
+  document.getElementById('modalTitle').textContent = isNew ? 'إضافة موظف جديد' : `${emp.name} — ${getEmployeeNumber(emp.id)}`;
 
   const lastEditText = fmtDateTime(emp.lastEditedAt);
   const lastEditHtml = (!isNew && lastEditText) ?
@@ -1180,7 +1198,7 @@ const EXCEL_FIELD_MAP = [
 ];
 
 function employeeToRow(e){
-  const row = {};
+  const row = { 'الرقم الوظيفي': getEmployeeNumber(e.id) };
   EXCEL_FIELD_MAP.forEach(([key,label])=>{
     let val = e[key] ?? '';
     if(Array.isArray(val)) val = val.join('، ');
@@ -1240,7 +1258,7 @@ function printEmployee(emp){
     .section{ margin-top:20px; font-weight:bold; font-size:14px; background:#f5f5f5; padding:6px 10px; }
   </style></head><body>
   <h1>نظام الماسة للموارد البشرية — بطاقة موظف</h1>
-  <p><strong>${emp.name}</strong> — الحالة: ${s.label}</p>
+  <p><strong>${emp.name}</strong> — الرقم الوظيفي: ${getEmployeeNumber(emp.id)} — الحالة: ${s.label}</p>
   <div class="section">البيانات الأساسية</div>
   <table>
     <tr><td>الجنسية</td><td>${emp.nationality||'—'}</td><td>الشركة</td><td>${emp.company||'—'}</td></tr>
