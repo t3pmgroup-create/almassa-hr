@@ -338,7 +338,7 @@ function setSyncStatus(text){
 /* ---------- واجهة KPI ---------- */
 function renderKPIs(){
   const total = EMPLOYEES.length;
-  let passport=0, eid=0, workCard=0, residency=0, annual=0, sick=0, onLeaveAny=0, newEmp=0, cancelling=0, terminated=0, absconding=0, renewalRejected=0, laborDispute=0;
+  let passport=0, eid=0, workCard=0, residency=0, annual=0, sick=0, present=0, newEmp=0, cancelling=0, terminated=0, cancelledOnly=0, absconding=0, renewalRejected=0, laborDispute=0, unauthorizedAbsence=0, currentActive=0;
   EMPLOYEES.forEach(e=>{
     if(isDocIssue(e.passportExp)) passport++;
     if(isDocIssue(e.emiratesIdExp)) eid++;
@@ -346,14 +346,17 @@ function renderKPIs(){
     if(isDocIssue(e.residencyExp)) residency++;
     if(isOnLeaveToday(e,'سنوية')) annual++;
     if(isOnLeaveToday(e,'مرضية')) sick++;
-    if(isOnLeaveToday(e)) onLeaveAny++;
+    if(!isExcludedFromPresent(e)) present++;
     const sKey = getStatus(e).key;
     if(sKey === 'new') newEmp++;
     if(sKey === 'cancelling' || sKey === 'terminating') cancelling++;
     if(sKey === 'cancelled' || sKey === 'terminated') terminated++;
+    if(sKey === 'cancelled') cancelledOnly++;
+    if(!['cancelled','terminated'].includes(sKey)) currentActive++;
     if(hasStatusValue(e,'هروب')) absconding++;
     if(hasStatusValue(e,'مرفوض تجديد إقامة')) renewalRejected++;
     if(e.hasLaborDispute) laborDispute++;
+    if(e.hasUnauthorizedAbsence) unauthorizedAbsence++;
   });
   document.getElementById('kpiTotal').textContent = total;
   document.getElementById('kpiTotalLabel').textContent = total;
@@ -363,13 +366,16 @@ function renderKPIs(){
   document.getElementById('kpiResidency').textContent = residency;
   document.getElementById('kpiAnnualLeave').textContent = annual;
   document.getElementById('kpiSickLeave').textContent = sick;
-  document.getElementById('kpiPresent').textContent = total - onLeaveAny;
+  document.getElementById('kpiPresent').textContent = present;
   document.getElementById('kpiNew').textContent = newEmp;
   document.getElementById('kpiCancelling').textContent = cancelling;
   document.getElementById('kpiTerminated').textContent = terminated;
+  document.getElementById('kpiCancelledOnly').textContent = cancelledOnly;
   document.getElementById('kpiAbsconding').textContent = absconding;
   document.getElementById('kpiRenewalRejected').textContent = renewalRejected;
   document.getElementById('kpiLaborDispute').textContent = laborDispute;
+  document.getElementById('kpiUnauthorizedAbsence').textContent = unauthorizedAbsence;
+  document.getElementById('kpiCurrentActive').textContent = currentActive;
 }
 
 /* ---------- رسم بياني حسب الجنسية ---------- */
@@ -422,6 +428,17 @@ function hasStatusValue(emp, value){
   return emp.manualStatus === value || (emp.note && emp.note.includes(value));
 }
 
+// يحدد هل الموظف يُستبعد من مؤشر "على الدوام" (ملغي/منتهي الخدمة، هروب، إجازة، منازعة عمالية، غياب بدون عذر)
+function isExcludedFromPresent(emp){
+  const sKey = getStatus(emp).key;
+  if(sKey === 'cancelled' || sKey === 'terminated') return true;
+  if(hasStatusValue(emp,'هروب')) return true;
+  if(isOnLeaveToday(emp)) return true;
+  if(emp.hasLaborDispute) return true;
+  if(emp.hasUnauthorizedAbsence) return true;
+  return false;
+}
+
 function matchesKpi(e, kpi){
   switch(kpi){
     case 'passport': return isDocIssue(e.passportExp);
@@ -430,13 +447,16 @@ function matchesKpi(e, kpi){
     case 'residency': return isDocIssue(e.residencyExp);
     case 'annual': return isOnLeaveToday(e,'سنوية');
     case 'sick': return isOnLeaveToday(e,'مرضية');
-    case 'present': return !isOnLeaveToday(e);
+    case 'present': return !isExcludedFromPresent(e);
     case 'new': return getStatus(e).key === 'new';
     case 'cancelling': return ['cancelling','terminating'].includes(getStatus(e).key);
     case 'terminated': return ['cancelled','terminated'].includes(getStatus(e).key);
+    case 'cancelled_only': return getStatus(e).key === 'cancelled';
     case 'absconding': return hasStatusValue(e,'هروب');
     case 'renewal_rejected': return hasStatusValue(e,'مرفوض تجديد إقامة');
     case 'labor_dispute': return !!e.hasLaborDispute;
+    case 'unauthorized_absence': return !!e.hasUnauthorizedAbsence;
+    case 'current_active': return !['cancelled','terminated'].includes(getStatus(e).key);
     default: return true;
   }
 }
@@ -547,6 +567,7 @@ function emptyEmployee(){
     manualStatus:'', manualStatusReason:'', renewalRejectedNote:'',
     abscondingDate:'', abscondingAuthorities:[],
     hasLaborDispute:false, laborDisputeDate:'', laborDisputeAuthorities:[], laborDisputeNote:'',
+    hasUnauthorizedAbsence:false, unauthorizedAbsenceDate:'', unauthorizedAbsenceNote:'',
     passportExp:'', passportNumber:'', emiratesIdExp:'', emiratesIdNumber:'', phone:'', email:'', address:'', city:'', education:'', jobTitle:'',
     insuranceNumber:'', insuranceCompany:'', employmentStart:'', employmentEnd:'', employmentEndReason:'',
     salaryBasic:0, salaryAllowances:0, leaves:[] };
@@ -663,6 +684,21 @@ function openEmployeeModal(id){
       </div>
     </div>
 
+    <h4 class="section-title" style="margin-top:18px;">غياب بدون عذر</h4>
+    <div class="modal-grid">
+      <div class="field">
+        <label style="display:flex; align-items:center; gap:8px; font-size:14px; font-weight:700;">
+          <input type="checkbox" id="editHasUnauthorizedAbsence" ${emp.hasUnauthorizedAbsence ? 'checked':''}> يوجد غياب بدون عذر
+        </label>
+      </div>
+    </div>
+    <div id="unauthorizedAbsenceWrap" style="${emp.hasUnauthorizedAbsence ? '' : 'display:none;'} margin-top:10px;">
+      <div class="modal-grid">
+        <div class="field"><label class="lbl">تاريخ الغياب</label><input type="date" id="editUnauthorizedAbsenceDate" value="${emp.unauthorizedAbsenceDate||''}"></div>
+        <div class="field" style="grid-column:2/-1;"><label class="lbl">ملاحظة</label><input type="text" id="editUnauthorizedAbsenceNote" value="${emp.unauthorizedAbsenceNote||''}"></div>
+      </div>
+    </div>
+
     <h4 class="section-title" style="margin-top:18px;">التوظيف والراتب</h4>
     <div class="modal-grid">
       <div class="field"><label class="lbl">تاريخ بدء العمل</label><input type="date" id="editEmpStart" value="${emp.employmentStart||''}"></div>
@@ -724,6 +760,9 @@ function openEmployeeModal(id){
   document.getElementById('editHasLaborDispute').addEventListener('change', (e)=>{
     document.getElementById('laborDisputeWrap').style.display = e.target.checked ? '' : 'none';
   });
+  document.getElementById('editHasUnauthorizedAbsence').addEventListener('change', (e)=>{
+    document.getElementById('unauthorizedAbsenceWrap').style.display = e.target.checked ? '' : 'none';
+  });
 
   document.getElementById('saveEmpBtn').addEventListener('click', isNew ? addNewEmployee : saveEmployeeEdits);
 
@@ -755,6 +794,9 @@ function collectEmployeeForm(){
     laborDisputeDate: document.getElementById('editLaborDisputeDate') ? (document.getElementById('editLaborDisputeDate').value || null) : null,
     laborDisputeAuthorities: Array.from(document.querySelectorAll('.laborDisputeAuthorityChk:checked')).map(c=>c.value),
     laborDisputeNote: document.getElementById('editLaborDisputeNote') ? document.getElementById('editLaborDisputeNote').value.trim() : '',
+    hasUnauthorizedAbsence: document.getElementById('editHasUnauthorizedAbsence') ? document.getElementById('editHasUnauthorizedAbsence').checked : false,
+    unauthorizedAbsenceDate: document.getElementById('editUnauthorizedAbsenceDate') ? (document.getElementById('editUnauthorizedAbsenceDate').value || null) : null,
+    unauthorizedAbsenceNote: document.getElementById('editUnauthorizedAbsenceNote') ? document.getElementById('editUnauthorizedAbsenceNote').value.trim() : '',
     phone: document.getElementById('editPhone').value.trim(),
     email: document.getElementById('editEmail').value.trim(),
     city: document.getElementById('editCity').value,
@@ -1194,6 +1236,7 @@ const EXCEL_FIELD_MAP = [
   ['abscondingDate','تاريخ بلاغ الهروب'],['abscondingAuthorities','جهة بلاغ الهروب'],
   ['hasLaborDispute','يوجد منازعة عمالية'],['laborDisputeDate','تاريخ المنازعة'],
   ['laborDisputeAuthorities','جهة المنازعة'],['laborDisputeNote','ملاحظة المنازعة'],
+  ['hasUnauthorizedAbsence','يوجد غياب بدون عذر'],['unauthorizedAbsenceDate','تاريخ الغياب'],['unauthorizedAbsenceNote','ملاحظة الغياب'],
   ['note','ملاحظة']
 ];
 
@@ -1248,6 +1291,10 @@ function printEmployee(emp){
     extraStatusHtml += `<div class="section">تفاصيل المنازعة العمالية</div>
     <table><tr><td>تاريخ المنازعة</td><td>${fmtDate(emp.laborDisputeDate)}</td><td>الجهة</td><td>${(emp.laborDisputeAuthorities||[]).join('، ')||'—'}</td></tr>
     <tr><td>ملاحظة</td><td colspan="3">${emp.laborDisputeNote||'—'}</td></tr></table>`;
+  }
+  if(emp.hasUnauthorizedAbsence){
+    extraStatusHtml += `<div class="section">غياب بدون عذر</div>
+    <table><tr><td>تاريخ الغياب</td><td>${fmtDate(emp.unauthorizedAbsenceDate)}</td><td>ملاحظة</td><td>${emp.unauthorizedAbsenceNote||'—'}</td></tr></table>`;
   }
   const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>${emp.name}</title>
   <style>
@@ -1430,7 +1477,8 @@ function bindUI(){
     total:'', passport:'انتهاء الجواز', eid:'انتهاء الهوية', workcard:'انتهاء بطاقة العمل',
     residency:'انتهاء الإقامة', annual:'في إجازة سنوية', sick:'في إجازة مرضية', present:'على الدوام',
     new:'موظفين جدد', cancelling:'قيد الإلغاء / إنهاء الخدمات', terminated:'منتهية الخدمة',
-    absconding:'بلاغ هروب', renewal_rejected:'رفض التجديد', labor_dispute:'منازعة عمالية'
+    cancelled_only:'ملغي', absconding:'بلاغ هروب', renewal_rejected:'رفض التجديد',
+    labor_dispute:'منازعة عمالية', unauthorized_absence:'غياب بدون عذر', current_active:'الموظفين الحاليين'
   };
   document.querySelectorAll('.kpi-card').forEach(c=>{
     c.addEventListener('click', ()=>{
