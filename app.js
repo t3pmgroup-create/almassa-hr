@@ -33,6 +33,9 @@ let unsubscribeTasks = null;
 let unsubscribeChat = null;
 let unsubscribeLoginLogs = null;
 let LOGIN_LOGS = [];
+let unsubscribeVehicles = null;
+let VEHICLES = [];
+let activeVehicleId = null;
 
 const CITIES = ['أبوظبي','دبي','الشارقة','عجمان','أم القيوين','رأس الخيمة','الفجيرة','العين'];
 const END_REASONS = ['استقالة','إنهاء خدمات','هروب','أخرى'];
@@ -258,6 +261,7 @@ async function boot(){
   subscribeTasks();
   subscribeChat();
   subscribeLoginLogs();
+  subscribeVehicles();
 }
 
 function sanitizeEmailId(email){
@@ -338,12 +342,13 @@ function setSyncStatus(text){
 /* ---------- واجهة KPI ---------- */
 function renderKPIs(){
   const total = EMPLOYEES.length;
-  let passport=0, eid=0, workCard=0, residency=0, annual=0, sick=0, present=0, newEmp=0, cancelling=0, terminated=0, cancelledOnly=0, absconding=0, renewalRejected=0, laborDispute=0, unauthorizedAbsence=0, currentActive=0;
+  let passport=0, eid=0, workCard=0, residency=0, license=0, annual=0, sick=0, present=0, newEmp=0, cancelling=0, terminated=0, cancelledOnly=0, absconding=0, renewalRejected=0, laborDispute=0, unauthorizedAbsence=0, currentActive=0;
   EMPLOYEES.forEach(e=>{
     if(isDocIssue(e.passportExp)) passport++;
     if(isDocIssue(e.emiratesIdExp)) eid++;
     if(isDocIssue(e.workCardExp)) workCard++;
     if(isDocIssue(e.residencyExp)) residency++;
+    if(isDocIssue(e.licenseExp)) license++;
     if(isOnLeaveToday(e,'سنوية')) annual++;
     if(isOnLeaveToday(e,'مرضية')) sick++;
     if(!isExcludedFromPresent(e)) present++;
@@ -364,6 +369,7 @@ function renderKPIs(){
   document.getElementById('kpiEid').textContent = eid;
   document.getElementById('kpiWorkCard').textContent = workCard;
   document.getElementById('kpiResidency').textContent = residency;
+  document.getElementById('kpiLicense').textContent = license;
   document.getElementById('kpiAnnualLeave').textContent = annual;
   document.getElementById('kpiSickLeave').textContent = sick;
   document.getElementById('kpiPresent').textContent = present;
@@ -445,6 +451,7 @@ function matchesKpi(e, kpi){
     case 'eid': return isDocIssue(e.emiratesIdExp);
     case 'workcard': return isDocIssue(e.workCardExp);
     case 'residency': return isDocIssue(e.residencyExp);
+    case 'license': return isDocIssue(e.licenseExp);
     case 'annual': return isOnLeaveToday(e,'سنوية');
     case 'sick': return isOnLeaveToday(e,'مرضية');
     case 'present': return !isExcludedFromPresent(e);
@@ -569,6 +576,7 @@ function emptyEmployee(){
     hasLaborDispute:false, laborDisputeDate:'', laborDisputeAuthorities:[], laborDisputeNote:'',
     hasUnauthorizedAbsence:false, unauthorizedAbsenceDate:'', unauthorizedAbsenceNote:'',
     passportExp:'', passportNumber:'', emiratesIdExp:'', emiratesIdNumber:'', phone:'', email:'', address:'', city:'', education:'', jobTitle:'',
+    licenseNumber:'', licenseExp:'',
     insuranceNumber:'', insuranceCompany:'', employmentStart:'', employmentEnd:'', employmentEndReason:'',
     salaryBasic:0, salaryAllowances:0, leaves:[] };
 }
@@ -655,6 +663,8 @@ function openEmployeeModal(id){
       <div class="field"><label class="lbl">رقم بطاقة العمل</label><input type="text" id="editWorkCardNumber" value="${emp.workCardNumber||''}"></div>
       <div class="field"><label class="lbl">إصدار الإقامة</label><input type="date" id="editIssue" value="${emp.residencyIssue||''}"></div>
       <div class="field"><label class="lbl">انتهاء الإقامة</label><input type="date" id="editExp" value="${emp.residencyExp||''}"></div>
+      <div class="field"><label class="lbl">رقم رخصة القيادة</label><input type="text" id="editLicenseNumber" value="${emp.licenseNumber||''}"></div>
+      <div class="field"><label class="lbl">انتهاء رخصة القيادة</label><input type="date" id="editLicenseExp" value="${emp.licenseExp||''}"></div>
     </div>
 
     <h4 class="section-title" style="margin-top:18px;">التأمين الصحي</h4>
@@ -809,6 +819,8 @@ function collectEmployeeForm(){
     workCardNumber: document.getElementById('editWorkCardNumber').value.trim(),
     residencyIssue: document.getElementById('editIssue').value || null,
     residencyExp: document.getElementById('editExp').value || null,
+    licenseNumber: document.getElementById('editLicenseNumber').value.trim(),
+    licenseExp: document.getElementById('editLicenseExp').value || null,
     insuranceNumber: document.getElementById('editInsuranceNumber').value.trim(),
     insuranceCompany: document.getElementById('editInsuranceCompany').value.trim(),
     employmentStart: document.getElementById('editEmpStart').value || null,
@@ -1152,6 +1164,211 @@ function printLoginLogs(){
 }
 
 
+/* ---------- المركبات ---------- */
+function getVehicleStatus(v){
+  const insD = daysUntil(v.insuranceExp);
+  const regD = daysUntil(v.registrationExp);
+  const worst = [insD, regD].filter(d=>d!==null);
+  if(!worst.length) return { key:'unknown', label:'غير محدد', cls:'badge-unknown' };
+  const minD = Math.min(...worst);
+  if(minD < 0) return { key:'expired', label:`منتهي منذ ${Math.abs(minD)} يوم`, cls:'badge-expired' };
+  if(minD <= 60) return { key:'soon', label:`تنتهي خلال ${minD} يوم`, cls:'badge-soon' };
+  return { key:'ok', label:'سارية', cls:'badge-ok' };
+}
+
+function subscribeVehicles(){
+  if(unsubscribeVehicles) unsubscribeVehicles();
+  unsubscribeVehicles = db.collection('vehicles').onSnapshot(snap=>{
+    VEHICLES = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    renderVehiclesTable();
+    renderVehicleKPI();
+  }, err=> console.error(err));
+}
+
+function renderVehicleKPI(){
+  const el = document.getElementById('kpiVehicleExp');
+  if(!el) return;
+  const count = VEHICLES.filter(v=> getVehicleStatus(v).key==='expired' || getVehicleStatus(v).key==='soon').length;
+  el.textContent = count;
+}
+
+function renderVehiclesTable(){
+  const tbody = document.getElementById('vehicleTableBody');
+  if(!tbody) return;
+  document.getElementById('vehicleResultCount').textContent = `${VEHICLES.length} مركبة`;
+  if(!VEHICLES.length){ tbody.innerHTML = '<tr><td colspan="8" class="empty-state">لا توجد مركبات مسجلة بعد</td></tr>'; return; }
+  const sorted = VEHICLES.slice().sort((a,b)=>{
+    const order = {expired:1, soon:2, unknown:3, ok:4};
+    return (order[getVehicleStatus(a).key]||9) - (order[getVehicleStatus(b).key]||9);
+  });
+  tbody.innerHTML = sorted.map(v=>{
+    const s = getVehicleStatus(v);
+    return `<tr data-id="${v.id}" class="row-clickable">
+      <td class="cell-name">${v.vehicleNumber||'—'}</td>
+      <td>${v.vehicleType||'—'}</td>
+      <td>${v.assignedToName||'—'}</td>
+      <td>${fmtDate(v.receivedDate)}</td>
+      <td>${fmtDate(v.registrationExp)}</td>
+      <td>${fmtDate(v.insuranceExp)}</td>
+      <td><span class="badge ${s.cls}">${s.label}</span></td>
+      <td class="cell-docs" id="vehDocCount_${v.id}">…</td>
+    </tr>`;
+  }).join('');
+  tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
+    const id = tr.dataset.id;
+    tr.addEventListener('click', ()=> openVehicleModal(id));
+    db.collection('vehicles').doc(id).collection('documents').get().then(s=>{
+      const el = document.getElementById('vehDocCount_'+id);
+      if(el) el.textContent = s.size ? `📎 ${s.size}` : '—';
+    }).catch(()=>{});
+  });
+}
+
+function openVehicleModal(id){
+  activeVehicleId = id;
+  const isNew = (id === null);
+  const v = isNew ? { vehicleNumber:'', vehicleType:'', assignedTo:'', assignedToName:'', receivedDate:'', registrationExp:'', insuranceExp:'', note:'' } : VEHICLES.find(x=>x.id===id);
+  if(!v) return;
+  document.getElementById('modalTitle').textContent = isNew ? 'إضافة مركبة جديدة' : `مركبة: ${v.vehicleNumber}`;
+  const empOptions = ['<option value="">— بدون —</option>'].concat(
+    EMPLOYEES.map(e=>`<option value="${e.id}" ${String(v.assignedTo)===String(e.id)?'selected':''}>${e.name}</option>`)
+  ).join('');
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-grid">
+      <div class="field"><label class="lbl">رقم المركبة</label><input type="text" id="vehNumber" value="${v.vehicleNumber||''}"></div>
+      <div class="field"><label class="lbl">نوع المركبة</label><input type="text" id="vehType" value="${v.vehicleType||''}"></div>
+      <div class="field"><label class="lbl">من مستلم المركبة</label><select id="vehAssignedTo">${empOptions}</select></div>
+      <div class="field"><label class="lbl">تاريخ الاستلام</label><input type="date" id="vehReceivedDate" value="${v.receivedDate||''}"></div>
+      <div class="field"><label class="lbl">انتهاء الملكية / الترخيص</label><input type="date" id="vehRegistrationExp" value="${v.registrationExp||''}"></div>
+      <div class="field"><label class="lbl">انتهاء التأمين</label><input type="date" id="vehInsuranceExp" value="${v.insuranceExp||''}"></div>
+      <div class="field" style="grid-column:1/-1;"><label class="lbl">ملاحظة</label><input type="text" id="vehNote" value="${v.note||''}"></div>
+    </div>
+    <div class="btn-row" style="margin-top:16px;">
+      <button class="btn-gold" id="saveVehicleBtn">${isNew ? 'إضافة المركبة' : 'حفظ التعديلات'}</button>
+      ${!isNew ? `<button class="btn-secondary" id="deleteVehicleBtn">🗑️ حذف المركبة</button>` : ''}
+    </div>
+    <p id="vehicleSaveStatus" class="muted" style="margin-top:8px;"></p>
+    ${!isNew ? `
+    <hr class="divider">
+    <h4 class="section-title">مستندات المركبة</h4>
+    <div id="vehDocList" class="doc-list"><p class="muted">جاري التحميل...</p></div>
+    <label class="upload-drop" id="vehUploadDrop">
+      <input type="file" id="vehFileInput" multiple hidden>
+      <span>📎 اسحب الملفات هنا أو اضغط للاختيار (استمارة، بوليصة تأمين...)</span>
+    </label>` : ''}
+  `;
+  attachDatePreviews(document.getElementById('modalBody'));
+  document.getElementById('saveVehicleBtn').addEventListener('click', isNew ? addNewVehicle : saveVehicleEdits);
+  if(!isNew){
+    document.getElementById('deleteVehicleBtn').addEventListener('click', deleteVehicle);
+    document.getElementById('vehFileInput').addEventListener('change', handleVehicleFiles);
+    renderVehicleDocList();
+  }
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function collectVehicleForm(){
+  const empSelect = document.getElementById('vehAssignedTo');
+  const empId = empSelect.value;
+  const empName = empId ? (EMPLOYEES.find(e=>String(e.id)===String(empId)) || {}).name || '' : '';
+  return {
+    vehicleNumber: document.getElementById('vehNumber').value.trim(),
+    vehicleType: document.getElementById('vehType').value.trim(),
+    assignedTo: empId || '',
+    assignedToName: empName,
+    receivedDate: document.getElementById('vehReceivedDate').value || null,
+    registrationExp: document.getElementById('vehRegistrationExp').value || null,
+    insuranceExp: document.getElementById('vehInsuranceExp').value || null,
+    note: document.getElementById('vehNote').value.trim()
+  };
+}
+
+async function addNewVehicle(){
+  const status = document.getElementById('vehicleSaveStatus');
+  const data = collectVehicleForm();
+  if(!data.vehicleNumber){ status.textContent = 'رقم المركبة مطلوب'; return; }
+  status.textContent = 'جاري الإضافة...';
+  try{
+    await db.collection('vehicles').add(data);
+    logActivity('إضافة مركبة', `أضاف مركبة: ${data.vehicleNumber}`);
+    status.textContent = 'تمت الإضافة ✓';
+    setTimeout(()=>{ document.getElementById('modalOverlay').style.display = 'none'; }, 700);
+  }catch(e){ status.textContent = 'تعذرت الإضافة: ' + e.message; }
+}
+
+async function saveVehicleEdits(){
+  const status = document.getElementById('vehicleSaveStatus');
+  status.textContent = 'جاري الحفظ...';
+  const data = collectVehicleForm();
+  try{
+    await db.collection('vehicles').doc(activeVehicleId).update(data);
+    logActivity('تعديل مركبة', `عدّل بيانات المركبة: ${data.vehicleNumber}`);
+    status.textContent = 'تم الحفظ ✓';
+  }catch(e){ status.textContent = 'تعذر الحفظ: ' + e.message; }
+}
+
+async function deleteVehicle(){
+  if(!confirm('حذف هذه المركبة نهائيًا؟')) return;
+  const v = VEHICLES.find(x=>x.id===activeVehicleId);
+  try{
+    await db.collection('vehicles').doc(activeVehicleId).delete();
+    logActivity('حذف مركبة', v ? v.vehicleNumber : activeVehicleId);
+    document.getElementById('modalOverlay').style.display = 'none';
+  }catch(e){ alert('تعذر الحذف: ' + e.message); }
+}
+
+function vehicleDocsRef(vehId){
+  return db.collection('vehicles').doc(vehId).collection('documents');
+}
+
+async function renderVehicleDocList(){
+  const el = document.getElementById('vehDocList');
+  try{
+    const snap = await vehicleDocsRef(activeVehicleId).orderBy('addedAt','desc').get();
+    if(snap.empty){ el.innerHTML = '<p class="muted">لا توجد مستندات مرفقة بعد.</p>'; return; }
+    el.innerHTML = snap.docs.map(d=>{
+      const doc = d.data();
+      return `<div class="doc-item">
+        <span class="doc-name">📄 ${doc.name}</span>
+        <div class="doc-actions">
+          <a target="_blank" href="${doc.url}" class="btn-tiny">فتح/تنزيل</a>
+          <button class="btn-tiny danger" onclick="removeVehicleDoc('${d.id}','${doc.path}')">حذف</button>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){ el.innerHTML = '<p class="muted">تعذر تحميل المستندات: '+e.message+'</p>'; }
+}
+
+async function handleVehicleFiles(e){
+  const files = Array.from(e.target.files);
+  for(const f of files){
+    const path = `vehicle_documents/${activeVehicleId}/${Date.now()}_${f.name}`;
+    const ref = storage.ref().child(path);
+    try{
+      await ref.put(f);
+      const url = await ref.getDownloadURL();
+      await vehicleDocsRef(activeVehicleId).add({
+        name:f.name, url, path, size:f.size,
+        addedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        uploadedBy: auth.currentUser.email
+      });
+    }catch(err){ alert('فشل رفع الملف ' + f.name + ': ' + err.message); }
+  }
+  renderVehicleDocList();
+  renderVehiclesTable();
+}
+
+async function removeVehicleDoc(docId, path){
+  if(!confirm('حذف هذا المستند نهائيًا؟')) return;
+  try{
+    await storage.ref().child(path).delete().catch(()=>{});
+    await vehicleDocsRef(activeVehicleId).doc(docId).delete();
+    renderVehicleDocList();
+    renderVehiclesTable();
+  }catch(e){ alert('تعذر الحذف: ' + e.message); }
+}
+
+
 /* ---------- المستندات (Firebase Storage + Firestore) ---------- */
 function docsRef(empId){
   return db.collection('employees').doc(String(empId)).collection('documents');
@@ -1228,6 +1445,7 @@ const EXCEL_FIELD_MAP = [
   ['emiratesIdExp','انتهاء الهوية'],['emiratesIdNumber','رقم الهوية'],
   ['workCardNumber','رقم بطاقة العمل'],['workCardExp','انتهاء بطاقة العمل'],
   ['residencyIssue','إصدار الإقامة'],['residencyExp','انتهاء الإقامة'],
+  ['licenseNumber','رقم رخصة القيادة'],['licenseExp','انتهاء رخصة القيادة'],
   ['insuranceNumber','رقم التأمين الصحي'],['insuranceCompany','شركة التأمين'],
   ['employmentStart','تاريخ بدء العمل'],['employmentEnd','تاريخ انتهاء العمل'],['employmentEndReason','سبب انتهاء العمل'],
   ['salaryBasic','الراتب الأساسي'],['salaryAllowances','البدلات'],
@@ -1318,6 +1536,7 @@ function printEmployee(emp){
     <tr><td>رقم الجواز</td><td>${emp.passportNumber||'—'}</td><td>انتهاء الجواز</td><td>${fmtDate(emp.passportExp)}</td></tr>
     <tr><td>رقم الهوية</td><td>${emp.emiratesIdNumber||'—'}</td><td>انتهاء الهوية</td><td>${fmtDate(emp.emiratesIdExp)}</td></tr>
     <tr><td>رقم بطاقة العمل</td><td>${emp.workCardNumber||'—'}</td><td>انتهاء بطاقة العمل</td><td>${fmtDate(emp.workCardExp)}</td></tr>
+    <tr><td>رقم رخصة القيادة</td><td>${emp.licenseNumber||'—'}</td><td>انتهاء الرخصة</td><td>${fmtDate(emp.licenseExp)}</td></tr>
     <tr><td>إصدار الإقامة</td><td>${fmtDate(emp.residencyIssue)}</td><td>انتهاء الإقامة</td><td>${fmtDate(emp.residencyExp)}</td></tr>
   </table>
   <div class="section">التأمين والتوظيف والراتب</div>
@@ -1467,6 +1686,8 @@ function bindUI(){
   document.getElementById('exportIcsBtn').addEventListener('click', exportICS);
   document.getElementById('exportAllExcelBtn').addEventListener('click', exportAllEmployeesExcel);
   document.getElementById('addEmployeeBtn').addEventListener('click', ()=> openEmployeeModal(null));
+  const addVehicleBtn = document.getElementById('addVehicleBtn');
+  if(addVehicleBtn) addVehicleBtn.addEventListener('click', ()=> openVehicleModal(null));
   document.getElementById('connectGoogleBtn').addEventListener('click', connectGoogle);
   document.getElementById('saveClientIdBtn').addEventListener('click', saveGoogleClientId);
   document.getElementById('addCalendarEventsBtn').addEventListener('click', addExpiryEventsToCalendar);
@@ -1476,6 +1697,7 @@ function bindUI(){
   const kpiLabels = {
     total:'', passport:'انتهاء الجواز', eid:'انتهاء الهوية', workcard:'انتهاء بطاقة العمل',
     residency:'انتهاء الإقامة', annual:'في إجازة سنوية', sick:'في إجازة مرضية', present:'على الدوام',
+    license:'انتهاء رخصة القيادة',
     new:'موظفين جدد', cancelling:'قيد الإلغاء / إنهاء الخدمات', terminated:'منتهية الخدمة',
     cancelled_only:'ملغي', absconding:'بلاغ هروب', renewal_rejected:'رفض التجديد',
     labor_dispute:'منازعة عمالية', unauthorized_absence:'غياب بدون عذر', current_active:'الموظفين الحاليين'
@@ -1483,6 +1705,13 @@ function bindUI(){
   document.querySelectorAll('.kpi-card').forEach(c=>{
     c.addEventListener('click', ()=>{
       const kpi = c.dataset.kpi;
+      if(kpi === 'vehicle_exp'){
+        document.querySelectorAll('.nav-item').forEach(i=>i.classList.remove('active'));
+        document.querySelector('.nav-item[data-view="vehicles"]').classList.add('active');
+        document.querySelectorAll('.view').forEach(v=>v.style.display='none');
+        document.getElementById('view-vehicles').style.display = 'block';
+        return;
+      }
       currentFilter.kpi = (kpi === 'total') ? '' : kpi;
       currentFilter.status = ''; currentFilter.q=''; currentFilter.company=''; currentFilter.nationality='';
       document.getElementById('searchInput').value = '';

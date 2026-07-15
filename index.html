@@ -57,6 +57,7 @@
     <nav class="nav">
       <div class="nav-item active" data-view="dashboard">📊 لوحة المتابعة</div>
       <div class="nav-item" data-view="tasks">📋 المهام</div>
+      <div class="nav-item" data-view="vehicles">🚗 المركبات</div>
       <div class="nav-item" data-view="chat">💬 دردشة الفريق</div>
       <div class="nav-item" data-view="settings">⚙️ الإعدادات والتكامل</div>
     </nav>
@@ -92,6 +93,14 @@
         <div class="kpi-card kpi-expired" data-kpi="residency">
           <div class="kpi-num" id="kpiResidency">0</div>
           <div class="kpi-label">انتهاء الإقامة</div>
+        </div>
+        <div class="kpi-card kpi-expired" data-kpi="license">
+          <div class="kpi-num" id="kpiLicense">0</div>
+          <div class="kpi-label">انتهاء رخصة القيادة</div>
+        </div>
+        <div class="kpi-card kpi-expired" data-kpi="vehicle_exp">
+          <div class="kpi-num" id="kpiVehicleExp">0</div>
+          <div class="kpi-label">انتهاء تراخيص المركبات</div>
         </div>
         <div class="kpi-card kpi-soon" data-kpi="annual">
           <div class="kpi-num" id="kpiAnnualLeave">0</div>
@@ -201,6 +210,29 @@
       </div>
 
       <div id="taskList" class="task-list"></div>
+    </section>
+
+    <!-- المركبات -->
+    <section id="view-vehicles" class="view">
+      <h1 class="page-title">إدارة المركبات</h1>
+      <p class="page-sub">مركبات الشركة، من يستلمها، وتواريخ الترخيص والتأمين</p>
+
+      <div class="toolbar">
+        <button class="btn-gold" id="addVehicleBtn">+ إضافة مركبة</button>
+        <span class="result-count" id="vehicleResultCount"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>رقم المركبة</th><th>النوع</th><th>المستلم</th><th>تاريخ الاستلام</th>
+              <th>انتهاء الملكية</th><th>انتهاء التأمين</th><th>الحالة</th><th>المستندات</th>
+            </tr>
+          </thead>
+          <tbody id="vehicleTableBody"></tbody>
+        </table>
+      </div>
     </section>
 
     <!-- دردشة الفريق -->
