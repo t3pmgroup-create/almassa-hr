@@ -36,6 +36,8 @@ let LOGIN_LOGS = [];
 let unsubscribeVehicles = null;
 let VEHICLES = [];
 let activeVehicleId = null;
+let vehicleFilter = { q:'' };
+const PLATE_EMIRATES = ['دبي','أبوظبي','الشارقة','عجمان','أم القيوين','رأس الخيمة','الفجيرة'];
 
 const CITIES = ['أبوظبي','دبي','الشارقة','عجمان','أم القيوين','رأس الخيمة','الفجيرة','العين'];
 const END_REASONS = ['استقالة','إنهاء خدمات','هروب','أخرى'];
@@ -1195,18 +1197,29 @@ function renderVehicleKPI(){
 function renderVehiclesTable(){
   const tbody = document.getElementById('vehicleTableBody');
   if(!tbody) return;
-  document.getElementById('vehicleResultCount').textContent = `${VEHICLES.length} مركبة`;
-  if(!VEHICLES.length){ tbody.innerHTML = '<tr><td colspan="8" class="empty-state">لا توجد مركبات مسجلة بعد</td></tr>'; return; }
-  const sorted = VEHICLES.slice().sort((a,b)=>{
+  let list = VEHICLES.slice();
+  if(vehicleFilter.q){
+    const q = normalizeAr(vehicleFilter.q);
+    const qRaw = vehicleFilter.q.trim().toLowerCase();
+    list = list.filter(v=>{
+      const driverName = v.isExternalDriver ? (v.externalDriverName||'') : (v.assignedToName||'');
+      return normalizeAr(driverName).includes(q) || (v.vehicleNumber||'').toLowerCase().includes(qRaw);
+    });
+  }
+  document.getElementById('vehicleResultCount').textContent = `${list.length} من ${VEHICLES.length}`;
+  if(!list.length){ tbody.innerHTML = '<tr><td colspan="9" class="empty-state">لا توجد نتائج مطابقة</td></tr>'; return; }
+  const sorted = list.sort((a,b)=>{
     const order = {expired:1, soon:2, unknown:3, ok:4};
     return (order[getVehicleStatus(a).key]||9) - (order[getVehicleStatus(b).key]||9);
   });
   tbody.innerHTML = sorted.map(v=>{
     const s = getVehicleStatus(v);
+    const driverName = v.isExternalDriver ? `${v.externalDriverName||'—'} (خارجي)` : (v.assignedToName||'—');
     return `<tr data-id="${v.id}" class="row-clickable">
       <td class="cell-name">${v.vehicleNumber||'—'}</td>
+      <td>${v.plateEmirate||'—'}</td>
       <td>${v.vehicleType||'—'}</td>
-      <td>${v.assignedToName||'—'}</td>
+      <td>${driverName}</td>
       <td>${fmtDate(v.receivedDate)}</td>
       <td>${fmtDate(v.registrationExp)}</td>
       <td>${fmtDate(v.insuranceExp)}</td>
@@ -1227,22 +1240,53 @@ function renderVehiclesTable(){
 function openVehicleModal(id){
   activeVehicleId = id;
   const isNew = (id === null);
-  const v = isNew ? { vehicleNumber:'', vehicleType:'', assignedTo:'', assignedToName:'', receivedDate:'', registrationExp:'', insuranceExp:'', note:'' } : VEHICLES.find(x=>x.id===id);
+  const v = isNew ? { vehicleNumber:'', plateEmirate:'', vehicleType:'', assignedTo:'', assignedToName:'', isExternalDriver:false, externalDriverName:'', externalDriverPhone:'', receivedDate:'', registrationExp:'', insuranceExp:'', note:'' } : VEHICLES.find(x=>x.id===id);
   if(!v) return;
   document.getElementById('modalTitle').textContent = isNew ? 'إضافة مركبة جديدة' : `مركبة: ${v.vehicleNumber}`;
-  const empOptions = ['<option value="">— بدون —</option>'].concat(
-    EMPLOYEES.map(e=>`<option value="${e.id}" ${String(v.assignedTo)===String(e.id)?'selected':''}>${e.name}</option>`)
+  const empOptions = EMPLOYEES.map(e=>`<option value="${e.name} — ${getEmployeeNumber(e.id)}">`).join('');
+  const currentEmpLabel = (!isNew && v.assignedTo) ? (()=>{
+    const emp = EMPLOYEES.find(x=>String(x.id)===String(v.assignedTo));
+    return emp ? `${emp.name} — ${getEmployeeNumber(emp.id)}` : '';
+  })() : '';
+  const emirateOptions = ['<option value="">— اختر —</option>'].concat(
+    PLATE_EMIRATES.map(em=>`<option value="${em}" ${v.plateEmirate===em?'selected':''}>${em}</option>`)
   ).join('');
   document.getElementById('modalBody').innerHTML = `
     <div class="modal-grid">
       <div class="field"><label class="lbl">رقم المركبة</label><input type="text" id="vehNumber" value="${v.vehicleNumber||''}"></div>
+      <div class="field"><label class="lbl">إمارة اللوحة</label><select id="vehPlateEmirate">${emirateOptions}</select></div>
       <div class="field"><label class="lbl">نوع المركبة</label><input type="text" id="vehType" value="${v.vehicleType||''}"></div>
-      <div class="field"><label class="lbl">من مستلم المركبة</label><select id="vehAssignedTo">${empOptions}</select></div>
       <div class="field"><label class="lbl">تاريخ الاستلام</label><input type="date" id="vehReceivedDate" value="${v.receivedDate||''}"></div>
       <div class="field"><label class="lbl">انتهاء الملكية / الترخيص</label><input type="date" id="vehRegistrationExp" value="${v.registrationExp||''}"></div>
       <div class="field"><label class="lbl">انتهاء التأمين</label><input type="date" id="vehInsuranceExp" value="${v.insuranceExp||''}"></div>
-      <div class="field" style="grid-column:1/-1;"><label class="lbl">ملاحظة</label><input type="text" id="vehNote" value="${v.note||''}"></div>
     </div>
+
+    <h4 class="section-title" style="margin-top:18px;">السائق / مستلم المركبة</h4>
+    <div class="modal-grid">
+      <div class="field">
+        <label style="display:flex; align-items:center; gap:8px; font-size:14px; font-weight:700;">
+          <input type="checkbox" id="vehIsExternal" ${v.isExternalDriver ? 'checked':''}> سائق خارجي (غير مسجل بالنظام)
+        </label>
+      </div>
+    </div>
+    <div id="vehInternalDriverWrap" style="${v.isExternalDriver ? 'display:none;' : ''} margin-top:8px;">
+      <div class="modal-grid">
+        <div class="field">
+          <label class="lbl">من مستلم المركبة (اكتب للبحث بالاسم)</label>
+          <input type="text" id="vehAssignedToSearch" list="empNamesList" value="${currentEmpLabel}" placeholder="ابحث عن اسم الموظف...">
+          <datalist id="empNamesList">${empOptions}</datalist>
+        </div>
+      </div>
+    </div>
+    <div id="vehExternalDriverWrap" style="${v.isExternalDriver ? '' : 'display:none;'} margin-top:8px;">
+      <div class="modal-grid">
+        <div class="field"><label class="lbl">اسم السائق الخارجي</label><input type="text" id="vehExternalName" value="${v.externalDriverName||''}"></div>
+        <div class="field"><label class="lbl">رقم تواصل السائق الخارجي</label><input type="text" id="vehExternalPhone" value="${v.externalDriverPhone||''}"></div>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top:10px;"><label class="lbl">ملاحظة</label><input type="text" id="vehNote" value="${v.note||''}"></div>
+
     <div class="btn-row" style="margin-top:16px;">
       <button class="btn-gold" id="saveVehicleBtn">${isNew ? 'إضافة المركبة' : 'حفظ التعديلات'}</button>
       ${!isNew ? `<button class="btn-secondary" id="deleteVehicleBtn">🗑️ حذف المركبة</button>` : ''}
@@ -1258,6 +1302,10 @@ function openVehicleModal(id){
     </label>` : ''}
   `;
   attachDatePreviews(document.getElementById('modalBody'));
+  document.getElementById('vehIsExternal').addEventListener('change', (e)=>{
+    document.getElementById('vehInternalDriverWrap').style.display = e.target.checked ? 'none' : '';
+    document.getElementById('vehExternalDriverWrap').style.display = e.target.checked ? '' : 'none';
+  });
   document.getElementById('saveVehicleBtn').addEventListener('click', isNew ? addNewVehicle : saveVehicleEdits);
   if(!isNew){
     document.getElementById('deleteVehicleBtn').addEventListener('click', deleteVehicle);
@@ -1268,14 +1316,25 @@ function openVehicleModal(id){
 }
 
 function collectVehicleForm(){
-  const empSelect = document.getElementById('vehAssignedTo');
-  const empId = empSelect.value;
-  const empName = empId ? (EMPLOYEES.find(e=>String(e.id)===String(empId)) || {}).name || '' : '';
+  const isExternal = document.getElementById('vehIsExternal').checked;
+  let empId = '', empName = '';
+  if(!isExternal){
+    const typed = document.getElementById('vehAssignedToSearch').value.trim();
+    const m = typed.match(/AM-(\d+)\s*$/);
+    if(m){
+      const emp = EMPLOYEES.find(e=> String(e.id) === String(parseInt(m[1],10)));
+      if(emp){ empId = emp.id; empName = emp.name; }
+    }
+  }
   return {
     vehicleNumber: document.getElementById('vehNumber').value.trim(),
+    plateEmirate: document.getElementById('vehPlateEmirate').value || '',
     vehicleType: document.getElementById('vehType').value.trim(),
+    isExternalDriver: isExternal,
     assignedTo: empId || '',
     assignedToName: empName,
+    externalDriverName: isExternal ? document.getElementById('vehExternalName').value.trim() : '',
+    externalDriverPhone: isExternal ? document.getElementById('vehExternalPhone').value.trim() : '',
     receivedDate: document.getElementById('vehReceivedDate').value || null,
     registrationExp: document.getElementById('vehRegistrationExp').value || null,
     insuranceExp: document.getElementById('vehInsuranceExp').value || null,
@@ -1688,6 +1747,13 @@ function bindUI(){
   document.getElementById('addEmployeeBtn').addEventListener('click', ()=> openEmployeeModal(null));
   const addVehicleBtn = document.getElementById('addVehicleBtn');
   if(addVehicleBtn) addVehicleBtn.addEventListener('click', ()=> openVehicleModal(null));
+  const vehicleSearchInput = document.getElementById('vehicleSearchInput');
+  if(vehicleSearchInput){
+    vehicleSearchInput.addEventListener('input', e=>{
+      vehicleFilter.q = e.target.value;
+      renderVehiclesTable();
+    });
+  }
   document.getElementById('connectGoogleBtn').addEventListener('click', connectGoogle);
   document.getElementById('saveClientIdBtn').addEventListener('click', saveGoogleClientId);
   document.getElementById('addCalendarEventsBtn').addEventListener('click', addExpiryEventsToCalendar);
